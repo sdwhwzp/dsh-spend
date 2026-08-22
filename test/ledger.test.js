@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { Context } from "@deepseek-ai/cordis";
 import { SpendAccountingService, SpendLedger, priceUsageMicros, shanghaiMonth } from "../lib/ledger.js";
 import { foldSession } from "../lib/stats.js";
-import { callsForPrincipal, planForDisplay, pricingForDisplay } from "../lib/index.js";
+import { assertPricingAdministrator, callsForPrincipal, normalizePricingOverride, planForDisplay, pricingForDisplay, principalOptionsFor, UsageStatsService } from "../lib/index.js";
+import { autoPlanFor, autoRatesFor, normalizeProvider } from "../lib/knowledge.js";
 
 const alice = { source: "dsh-passwords", id: "1", username: "alice", role: "user" };
 const bob = { source: "dsh-passwords", id: "2", username: "bob", role: "user" };
@@ -25,6 +26,47 @@ test("integer pricing and Shanghai month are deterministic", () => {
   assert.deepEqual(priceUsageMicros(call(), pricing, 7.2).amountMicros, 7_200_000);
   assert.equal(shanghaiMonth(Date.parse("2026-07-31T15:59:59Z")), "2026-07");
   assert.equal(shanghaiMonth(Date.parse("2026-07-31T16:00:00Z")), "2026-08");
+});
+
+test("codex subscription calls use exact internal token rates", () => {
+  assert.equal(normalizeProvider("codex"), "openai-codex");
+  assert.deepEqual(autoPlanFor("codex"), {
+    provider: "codex",
+    type: "code",
+    auto: true,
+    label: "OpenAI Codex",
+    subscription: { amount: 20, currency: "USD", period: "month" },
+    quotaRequests: 100,
+    quotaTokens: null,
+    dollarsPerWeek: null,
+    dollarsPerMonth: null,
+    periodDays: 7,
+    tiers: [
+      { name: "Plus", default: true, subscription: { amount: 20, currency: "USD", period: "month" }, quotaRequests: 100, periodDays: 7 },
+      { name: "Pro 5x", default: false, subscription: { amount: 100, currency: "USD", period: "month" }, quotaRequests: 500, periodDays: 7 },
+      { name: "Pro 20x", default: false, subscription: { amount: 200, currency: "USD", period: "month" }, quotaRequests: 2000, periodDays: 7 },
+      { name: "Business", default: false, subscription: { amount: 20, currency: "USD", period: "month" }, quotaRequests: 100, periodDays: 7 },
+    ],
+  });
+  const codexRates = autoRatesFor("codex");
+  assert.ok(codexRates.every((row) => row.provider === "codex" && row.auto === true));
+  assert.deepEqual(priceUsageMicros(call({
+    provider: "codex",
+    model: "gpt-5.3-codex-spark",
+    inputTokens: 1_000_000,
+  }), codexRates, 7.2), {
+    priced: true,
+    amountMicros: 12_600_000,
+    rate: {
+      model: "gpt-5.3-codex-spark",
+      provider: "codex",
+      auto: true,
+      inputPerMillion: 1.75,
+      outputPerMillion: 14,
+      cacheReadPerMillion: 0.175,
+      cacheWritePerMillion: 0,
+    },
+  });
 });
 
 test("durable turn/step principals survive shared-session folding", () => {
@@ -47,6 +89,75 @@ test("dashboard call scopes cannot be widened by an ordinary user", () => {
   assert.deepEqual(callsForPrincipal(calls, { ...alice, role: "admin" }, "2").map((entry) => entry.turn), [2]);
   assert.deepEqual(callsForPrincipal(calls, { ...alice, role: "admin" }).map((entry) => entry.turn), [1, 2]);
   assert.throws(() => callsForPrincipal(calls, undefined), /authenticated principal/);
+});
+
+test("administrator account options include self and distinct durable principals", () => {
+  const admin = { source: "dsh-passwords", id: "9", username: "owner", role: "admin" };
+  const calls = [
+    call({ turn: 1, principal: bob }),
+    call({ turn: 2, principal: alice }),
+    call({ turn: 3, principal: bob }),
+  ];
+  assert.deepEqual(principalOptionsFor(calls, admin), [admin, alice, bob]);
+  assert.deepEqual(principalOptionsFor(calls, alice), []);
+  assert.throws(() => principalOptionsFor(calls, undefined), /authenticated principal/);
+});
+
+test("only administrators can normalize durable display-currency price overrides", () => {
+  const admin = { source: "dsh-passwords", id: "9", username: "owner", role: "admin" };
+  assert.doesNotThrow(() => assertPricingAdministrator(admin));
+  assert.throws(() => assertPricingAdministrator(alice), /administrator permission/);
+  assert.throws(() => assertPricingAdministrator(undefined), /authenticated principal/);
+  assert.deepEqual(normalizePricingOverride({
+    provider: " custom ", model: " model ", currency: "CNY",
+    inputPerMillion: 7.2, outputPerMillion: 14.4,
+    cacheReadPerMillion: 0.72, cacheWritePerMillion: 9,
+  }, 7.2, 1234), {
+    provider: "custom", model: "model",
+    inputPerMillion: 1, outputPerMillion: 2,
+    cacheReadPerMillion: 0.1, cacheWritePerMillion: 1.25,
+    priceVersion: "custom-1234", updatedAt: 1234, custom: true,
+  });
+  assert.throws(() => normalizePricingOverride({ provider: "custom", model: "model", currency: "CNY" }, 7.2), /inputPerMillion/);
+});
+
+test("pricing mutation endpoints enforce admin authority and refresh accounting", async () => {
+  const request = {
+    provider: "private", model: "new-model", currency: "CNY",
+    inputPerMillion: 7.2, outputPerMillion: 14.4,
+    cacheReadPerMillion: 0.72, cacheWritePerMillion: 9,
+  };
+  const rejected = {
+    ctx: { typertGateway: { currentPrincipal: () => alice } },
+    usdCnyRate: 7.2,
+  };
+  await assert.rejects(UsageStatsService.prototype.savePricing.call(rejected, request), /administrator permission/);
+  await assert.rejects(UsageStatsService.prototype.deletePricing.call(rejected, request), /administrator permission/);
+
+  let saved;
+  let deleted;
+  let reconciled = 0;
+  const admin = { source: "dsh-passwords", id: "9", username: "owner", role: "admin" };
+  const service = {
+    ctx: { typertGateway: { currentPrincipal: () => admin } },
+    usdCnyRate: 7.2,
+    currency: "CNY",
+    cache: new Map([["old", {}]]),
+    ledger: {
+      savePricingOverride: (row) => { saved = row; return row; },
+      deletePricingOverride: (provider, model) => { deleted = [provider, model]; return true; },
+    },
+    accounting: { reconcile: async () => { reconciled++; } },
+  };
+  const result = await UsageStatsService.prototype.savePricing.call(service, request);
+  assert.equal(saved.provider, "private");
+  assert.equal(saved.inputPerMillion, 1);
+  assert.equal(result.inputPerMillion, 7.2);
+  assert.equal(reconciled, 1);
+  assert.equal(service.cache.size, 0);
+  assert.deepEqual(await UsageStatsService.prototype.deletePricing.call(service, request), { removed: true });
+  assert.deepEqual(deleted, ["private", "new-model"]);
+  assert.equal(reconciled, 2);
 });
 
 test("CNY display converts rates, schedules, subscriptions and monetary quotas", () => {
@@ -121,6 +232,33 @@ test("unknown models stay unpriced and can be priced later without repricing his
     });
     second.ingest(unknown);
     assert.equal(second.monthlyUsedMicros(alice, "2026-08"), 21_600_000);
+    second.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("administrator price overrides persist and stamp their own price version", () => {
+  const directory = mkdtempSync(join(tmpdir(), "dsh-spend-custom-price-"));
+  const path = join(directory, "ledger.sqlite");
+  const custom = normalizePricingOverride({
+    provider: "private-provider", model: "private-model", currency: "USD",
+    inputPerMillion: 1, outputPerMillion: 2,
+    cacheReadPerMillion: 0.1, cacheWritePerMillion: 1.25,
+  }, 7.2, 4567);
+  try {
+    const first = new SpendLedger(path, { pricing: [], usdCnyRate: 7.2, priceVersion: "base", fxVersion: "fx1" });
+    first.savePricingOverride(custom);
+    first.setPricing(first.pricingOverrides());
+    first.ingest(call({ provider: "private-provider", model: "private-model" }));
+    assert.equal(first.monthlyUsedMicros(alice, "2026-08"), 7_200_000);
+    assert.equal(first.report(alice, { month: "2026-08" })[0].price_version, "custom-4567");
+    first.close();
+
+    const second = new SpendLedger(path, { pricing: [], usdCnyRate: 7.2, priceVersion: "base", fxVersion: "fx1" });
+    assert.deepEqual(second.pricingOverrides(), [{ ...custom }]);
+    assert.equal(second.deletePricingOverride("private-provider", "private-model"), true);
+    assert.deepEqual(second.pricingOverrides(), []);
     second.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });

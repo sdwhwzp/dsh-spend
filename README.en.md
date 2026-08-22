@@ -27,7 +27,11 @@ Ledger amounts use integer CNY micros (`¥1 = 1,000,000 micros`). Configured pri
 
 Personal charging accepts only an exact provider/model row or an explicit generic model row. An unmatched model is recorded as unpriced, warns once and has amount 0; after an administrator adds an exact rate, another scan can price it. `defaultPricing` is never used for a personal debit. The legacy dashboard may still use that fallback for an estimate, but the estimate does not participate in `dsh-passwords` personal allowance enforcement.
 
-`usageStats/query` reads identity from the Host's verified request context and ignores browser identity claims. An ordinary user's dashboard and CSV/JSON/call-log exports contain only that user's calls. Administrators see all calls by default and may pass `principalId` to filter. Anonymous calls are rejected. The internal `spendAccounting` service exposes natural-month usage, allowance status and authorized reports for the per-model-step check in `dsh-passwords`.
+The `codex` route registered by `dsh-plugin-subscriptions` normalizes to `openai-codex` and enters the personal ledger and monthly allowance checks at the built-in standard OpenAI API token reference rates. This is an internal customer allocation, not an additional bill beyond the ChatGPT subscription; `gpt-5.3-codex-spark` inherits the `gpt-5.3-codex` rate because no separate public price exists. Explicit `pricing` can still override any model's internal rate.
+
+Administrators can add or edit an internal price for any provider/model under Spend → Call details → Rates, entering per-million input, output, cache-read and cache-write prices in the dashboard's current currency. Custom prices persist in the same SQLite ledger, override configured and built-in knowledge-base rates, and apply to new calls immediately; unpriced history is backfilled while already priced history retains its recorded price version. Subaccounts can view rates but cannot add, change, or delete them.
+
+`usageStats/query` reads identity from the Host's verified request context and ignores browser identity claims. An ordinary user's dashboard and CSV/JSON/call-log exports contain only that user's calls. Administrators see all calls by default and can select only themselves or one subaccount in the dashboard, after which the server isolates statistics by `principalId`. Anonymous calls are rejected. The internal `spendAccounting` service exposes natural-month usage, allowance status and authorized reports for the per-model-step check in `dsh-passwords`.
 
 Natural months always use `Asia/Shanghai`. `dsh-passwords` registers the current account's allowance resolver with this plugin, so the Spend dashboard and hover preview show that account's remaining CNY allowance without pinning policy changes in the statistics cache. `monthlyBudget` is a deployment-wide display value only and never gates a personal allowance; fixed subscription fees are not allocated to personal ledgers.
 
@@ -130,7 +134,7 @@ config:
   refreshSeconds: 30       # auto-refresh interval in seconds (>= 5)
   ledgerPath: /var/lib/dsh/spend-ledger.sqlite
   usdCnyRate: 7.2          # fixed USD/CNY rate shared by dashboard and ledger
-  priceVersion: 2026-08-21
+  priceVersion: 2026-08-22
   fxVersion: fixed-2026-08-21
   monthlyBudget: 50        # optional deployment-wide display; not a personal gate
   plans:                   # billing plans: Token Plan / Code Plan with usage & remaining
@@ -175,6 +179,7 @@ dsh-spend/
 ├── lib/
 │   ├── index.js        # host plugin: UsageStatsService (Typert Remote)
 │   ├── knowledge.js    # provider knowledge base: plan auto-detection (Code/Token)
+│   ├── ledger.js       # SQLite personal ledger, administrator price overrides and allowance service
 │   ├── stats.js        # pure replay / aggregation / pricing logic (unit-testable)
 │   └── client.js       # browser bundle (hand-written __ModuleLoader__ format)
 └── node_modules/       # local dependency symlinks to the dsh installation (not committed)
