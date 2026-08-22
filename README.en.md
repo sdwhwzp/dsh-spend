@@ -12,12 +12,26 @@ A **floating usage widget** pinned to the bottom-right corner of the dsh Web UI:
 - **Hover**: summary preview (cost, tokens, input / output / cache-read, call count, **today's subtotal**);
 - **Click**: expands the dashboard into four tabs; a **workspace filter** dropdown on top scopes every dimension to one project (drill down into subdirectories):
 
-  - **Overview** (a dashboard in the KPI + trend style of mainstream usage panels): the **billing bar** (estimated monthly spend + composition, **projected month-end usage spend**, token estimate, total tokens, calls, sessions, **avg cost / call**, **cache hit rate**, optional **monthly budget** — pill turns amber at 80%, red at 100% — and **active days / day streak**), **Plans** (auto-detected Code/Token plans with tiers, quota used & remaining), the **time series** (24h by default, switchable to 24h / 72h / 7d; the x-axis starts at the first hour with usage inside the range to avoid idle gaps, and shows dates when the day changes so repeated hours stay readable), an **activity heatmap** (52 weeks, GitHub-style, cell depth = daily token volume, hover for tokens / cost / calls), **top providers / top models by cost** (6 rows each) and the 31-day trend;
+  - **Overview** (a dashboard in the KPI + trend style of mainstream usage panels): the **billing bar** (a subuser's **remaining allowance**, estimated monthly spend + composition, **projected month-end usage spend**, token estimate, total tokens, calls, sessions, **avg cost / call**, **cache hit rate**, optional deployment **monthly budget** — pill turns amber at 80%, red at 100% — and **active days / day streak**), **Plans** (auto-detected Code/Token plans with tiers, quota used & remaining), the **time series** (24h by default, switchable to 24h / 72h / 7d; the x-axis starts at the first hour with usage inside the range to avoid idle gaps, and shows dates when the day changes so repeated hours stay readable), an **activity heatmap** (52 weeks, GitHub-style, cell depth = daily token volume, hover for tokens / cost / calls), **top providers / top models by cost** (6 rows each) and the 31-day trend;
   - **Today**: today's calls, tokens and cost summary plus an **hour-by-hour** token / cost chart for the current day (the axis starts at today's first hour with usage, so idle overnight hours don't stretch the chart; a day without usage collapses to the current hour);
   - **Performance**: per-model **time-to-first-token (TTFT) avg / P50 / P90, generation speed (tokens/s) and average latency**, plus hourly TTFT / speed curves (same 24h / 72h / 7d range switch, also starting at the first hour with samples);
   - **Call details**: calls, tokens and cost per **session × model**, plus **by-working-directory stats** (sessions / models / calls / cost per project), **by-session stats**, **recent calls** (cost anomalies far above the mean are flagged with a red dot) and the **rate table** — all also openable in a **separate window** that auto-refreshes with the main one and offers **CSV / JSON / call-log CSV export**.
 
 Data auto-refreshes every `refreshSeconds` (default 30s; the interval is driven by the server config, no frontend change needed) and can be refreshed manually from the panel.
+
+## Principal-scoped accounting ledger and access control
+
+The plugin also maintains a separate SQLite spend ledger. It accepts only final `assistant/message` usage carrying an authenticated principal and uses `(sessionId, turn, step)` as its unique key, so live events, log replay and process restarts cannot charge twice. Each turn/step in a shared Session uses the identity on its durable event; users A and B never share an account entry.
+
+Ledger amounts use integer CNY micros (`¥1 = 1,000,000 micros`). Configured prices are USD per million tokens and are converted with the fixed `usdCnyRate`; every entry freezes its price version, FX version, input/output/cache-read/cache-write/reasoning tokens, matched rate and CNY amount. Later price changes never alter an already priced entry.
+
+Personal charging accepts only an exact provider/model row or an explicit generic model row. An unmatched model is recorded as unpriced, warns once and has amount 0; after an administrator adds an exact rate, another scan can price it. `defaultPricing` is never used for a personal debit. The legacy dashboard may still use that fallback for an estimate, but the estimate does not participate in `dsh-passwords` personal allowance enforcement.
+
+`usageStats/query` reads identity from the Host's verified request context and ignores browser identity claims. An ordinary user's dashboard and CSV/JSON/call-log exports contain only that user's calls. Administrators see all calls by default and may pass `principalId` to filter. Anonymous calls are rejected. The internal `spendAccounting` service exposes natural-month usage, allowance status and authorized reports for the per-model-step check in `dsh-passwords`.
+
+Natural months always use `Asia/Shanghai`. `dsh-passwords` registers the current account's allowance resolver with this plugin, so the Spend dashboard and hover preview show that account's remaining CNY allowance without pinning policy changes in the statistics cache. `monthlyBudget` is a deployment-wide display value only and never gates a personal allowance; fixed subscription fees are not allocated to personal ledgers.
+
+The dashboard defaults to CNY. Rate rows remain USD per million tokens; the host converts rates, costs, auto-detected subscription fees and monetary quotas with `usdCnyRate` before returning CNY to the browser, rather than merely changing the currency symbol.
 
 ## Screenshots
 
@@ -88,7 +102,7 @@ dsh --profile web --dump-config | grep usage-stats
 dsh web
 ```
 
-To install from source: `dsh plugin --profile web add github:nonewind/dsh-spend` (or a local path with `-w`).
+To install from source: `dsh plugin --profile web add github:sdwhwzp/dsh-spend` (or a local path with `-w`).
 
 **Overriding defaults**: the plugin's built-in provider knowledge base auto-detects pricing and billing plans (see above), so no config is usually required. To override, add an `insert` row with the same id (`usage-stats`) to `~/.dsh/profiles/web/cordis.patch.yml` — the user layer applies after bundle layers and the same-id row wins (see the `config` below).
 
@@ -98,8 +112,8 @@ The `config` of the `usage-stats` row in `cordis.patch.yml`:
 
 ```yaml
 config:
-  currency: USD            # CNY (¥) or USD ($)
-  pricing:                 # per-model rates (per million tokens)
+  currency: CNY            # default CNY display; USD remains available
+  pricing:                 # USD per million tokens; converted with usdCnyRate
     - model: deepseek-v4-flash
       inputPerMillion: 0.14
       outputPerMillion: 0.28
@@ -114,7 +128,11 @@ config:
   maxRecentCalls: 50       # max recent calls
   seriesHours: 168         # time-series window in hours (zero-filled; UI offers 24h/72h/7d)
   refreshSeconds: 30       # auto-refresh interval in seconds (>= 5)
-  monthlyBudget: 50        # optional monthly spend budget (same currency): used/remaining + alerts
+  ledgerPath: /var/lib/dsh/spend-ledger.sqlite
+  usdCnyRate: 7.2          # fixed USD/CNY rate shared by dashboard and ledger
+  priceVersion: 2026-08-21
+  fxVersion: fixed-2026-08-21
+  monthlyBudget: 50        # optional deployment-wide display; not a personal gate
   plans:                   # billing plans: Token Plan / Code Plan with usage & remaining
     - provider: opencode-go
       type: token          # pay-as-you-go: used cost (estimate); balance optional

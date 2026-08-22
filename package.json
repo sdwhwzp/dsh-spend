@@ -14,6 +14,9 @@
     "./stats": {
       "default": "./lib/stats.js"
     },
+    "./ledger": {
+      "default": "./lib/ledger.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -38,11 +41,14 @@
   "author": "ziheng <wn345361049@gmail.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nonewind/dsh-spend.git"
+    "url": "git+https://github.com/sdwhwzp/dsh-spend.git"
   },
-  "homepage": "https://github.com/nonewind/dsh-spend#readme",
+  "homepage": "https://github.com/sdwhwzp/dsh-spend#readme",
   "bugs": {
-    "url": "https://github.com/nonewind/dsh-spend/issues"
+    "url": "https://github.com/sdwhwzp/dsh-spend/issues"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
   },
   "dsh": {
     "bundle": {

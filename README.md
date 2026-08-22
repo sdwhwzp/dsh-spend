@@ -14,12 +14,26 @@
 - **hover**：浮现摘要预览（费用、Token、输入 / 输出 / 缓存读、调用次数、**今日小计**）；
 - **点击**：展开详情面板，四个标签页；面板顶部有**工作区筛选**下拉（按项目限定全部统计口径，支持逐级下钻子目录）：
 
-  - **总览**（仪表盘，参考主流用量面板的 KPI + 趋势布局）：**统计栏**（预计花费（月）+ 构成、**当月预计**（本月按量外推）、按 token 估算、总 Token、调用、会话、**平均 / 次**、**缓存命中率**、**月预算**（可选配置，超 80% 胶囊变黄、超 100% 变红）、**活跃天数 / 连续使用**）+ **计划用量**（自动识别 Code/Token 计划、档位、额度使用与剩余）+ **时间曲线**（默认近 24 小时，可切换 **24h / 72h / 7d**；横轴从范围内**首个有调用的小时**起算避免空白，跨天处自动标注日期避免重复小时标签）+ **活跃热力图**（近 52 周，GitHub 风格，颜色深度 = 当日 Token 量，悬停看 Token / 费用 / 调用）+ **费用 Top 提供商 / Top 模型**（各 6 行）+ 近 31 天趋势；
+  - **总览**（仪表盘，参考主流用量面板的 KPI + 趋势布局）：**统计栏**（子账号的**我的剩余额度**、预计花费（月）+ 构成、**当月预计**（本月按量外推）、按 token 估算、总 Token、调用、会话、**平均 / 次**、**缓存命中率**、**月预算**（可选部署总预算，超 80% 胶囊变黄、超 100% 变红）、**活跃天数 / 连续使用**）+ **计划用量**（自动识别 Code/Token 计划、档位、额度使用与剩余）+ **时间曲线**（默认近 24 小时，可切换 **24h / 72h / 7d**；横轴从范围内**首个有调用的小时**起算避免空白，跨天处自动标注日期避免重复小时标签）+ **活跃热力图**（近 52 周，GitHub 风格，颜色深度 = 当日 Token 量，悬停看 Token / 费用 / 调用）+ **费用 Top 提供商 / Top 模型**（各 6 行）+ 近 31 天趋势；
   - **今日**：当天的调用数、Token 与费用小结 + **今日逐小时**的 Token / 费用图表（横轴从当天**首个有调用的小时**起算，避免凌晨空白；当天无调用时窗口收敛到当前小时）；
   - **性能**：每个模型的**首字延时（TTFT）均值 / P50 / P90、生成速度（tokens/s）、总延迟均值**，以及按小时的 TTFT / 速度曲线（同样支持 **24h / 72h / 7d** 范围切换，并同样从首个有样本的小时起算）；
   - **调用明细**：**每个会话 × 模型**的调用次数、token 与费用明细 + **按工作目录统计**（各项目会话数 / 模型数 / 调用 / 费用）+ **按会话统计** + **最近调用**（**费用远超均值的异常调用标红点**）+ **计费单价表**，可在**独立窗口**中打开（随主窗口自动刷新，支持 **CSV / JSON / 调用明细 CSV 导出**）。
 
 数据按 `refreshSeconds`（默认 30 秒）定时自动刷新（间隔由服务端配置下发，页面无需改动），面板内也可手动刷新。
+
+## 按用户计费账本与访问控制
+
+插件同时维护一个独立 SQLite 消费账本。只接收带认证 principal 的最终 `assistant/message` usage，以 `(sessionId, turn, step)` 为唯一键；实时事件、日志重放和进程重启不会重复扣费。共享 Session 中每个 turn/step 使用其耐久事件上的消息身份，用户 A 与用户 B 不会串账。
+
+账本金额全部使用人民币微元整数（`¥1 = 1,000,000 micros`）。配置价格是 USD/百万 Token，并以固定 `usdCnyRate` 折算；每笔记录固化价格版本、汇率版本、输入/输出/缓存读写/推理 Token、命中的价表和人民币金额。已计价记录不会因以后改价而变化。
+
+个人扣费只接受 provider/model 精确价或明确的通用 model 价。未匹配模型记为“未计价”、输出一次告警且金额为 0；管理员补充精确价后可重新扫描计价，绝不使用 `defaultPricing` 模糊扣款。现有仪表盘仍可用 `defaultPricing` 展示估算，但该估算不参与 `dsh-passwords` 的个人额度判断。
+
+`usageStats/query` 从宿主的已验证请求上下文取得身份，忽略浏览器声称的身份。普通用户的面板与 CSV/JSON/调用明细导出只包含自己的调用；管理员默认查看全部，也可在请求中传 `principalId` 筛选。匿名调用被拒绝。内部 `spendAccounting` 服务提供自然月已用金额、额度状态和按权限报告，供 `dsh-passwords` 在每个模型步骤前同步检查。
+
+自然月固定按 `Asia/Shanghai` 计算。`dsh-passwords` 会向本插件注册当前账号的月额度解析器，Spend 面板和悬浮预览实时显示该账号的人民币剩余额度；额度修改不会被统计缓存冻结。`monthlyBudget` 仅是部署总预算的展示值，不参与个人额度门控；订阅固定月费也不分摊到个人账本。
+
+仪表盘默认使用人民币。价表始终按 USD/百万 Token 配置，服务端先用 `usdCnyRate` 换算单价、费用、自动识别的订阅费和金额额度，再向页面返回 CNY，避免仅替换货币符号造成金额错误。
 
 ## 界面预览
 
@@ -88,7 +102,7 @@ dsh --profile web --dump-config | grep usage-stats
 dsh web
 ```
 
-也可以从源码安装：`dsh plugin --profile web add github:nonewind/dsh-spend`（或本地路径 `-w /path/to/dsh-spend`）。
+也可以从源码安装：`dsh plugin --profile web add github:sdwhwzp/dsh-spend`（或本地路径 `-w /path/to/dsh-spend`）。
 
 **覆盖默认配置**：插件内置供应商知识库自动识别价格与计费计划（见上方），一般无需配置。需要覆盖时，在 `~/.dsh/profiles/web/cordis.patch.yml` 中加入同 id（`usage-stats`）的 insert 行即可——用户层在 bundle 层之后应用，同名行覆盖生效（配置项见下方「配置」章节）。
 
@@ -98,8 +112,8 @@ dsh web
 
 ```yaml
 config:
-  currency: USD            # CNY（¥）或 USD（$）
-  pricing:                 # 按模型精确匹配的单价（每百万 token）
+  currency: CNY            # 默认人民币展示；也可设为 USD
+  pricing:                 # USD/百万 token，页面按 usdCnyRate 换算
     - model: deepseek-v4-flash
       inputPerMillion: 0.14
       outputPerMillion: 0.28
@@ -114,7 +128,11 @@ config:
   maxRecentCalls: 50       # 最近调用最多展示行数
   seriesHours: 168         # 时间曲线窗口（小时，服务端按此出 0 填充连续序列；UI 可切换 24h/72h/7d）
   refreshSeconds: 30       # 悬浮窗自动刷新间隔（秒，>= 5）
-  monthlyBudget: 50        # 可选：月度花费预算（单位同 currency），UI 显示已用/剩余并告警
+  ledgerPath: /var/lib/dsh/spend-ledger.sqlite
+  usdCnyRate: 7.2          # 仪表盘与个人账本共用的固定 USD/CNY 汇率
+  priceVersion: 2026-08-21
+  fxVersion: fixed-2026-08-21
+  monthlyBudget: 50        # 可选部署总预算展示，不参与个人额度判断
   plans:                   # 计费计划：判断 Token Plan / Code Plan 并展示使用量与剩余量
     - provider: opencode-go
       type: token          # token 计费：已用费用（估算）；balance 为充值余额（可选）
