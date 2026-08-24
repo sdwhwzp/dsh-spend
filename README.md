@@ -29,11 +29,11 @@
 
 个人扣费只接受 provider/model 精确价或明确的通用 model 价。未匹配模型记为“未计价”、输出一次告警且金额为 0；管理员补充精确价后可重新扫描计价，绝不使用 `defaultPricing` 模糊扣款。现有仪表盘仍可用 `defaultPricing` 展示估算，但该估算不参与 `dsh-passwords` 的个人额度判断。
 
-`dsh-plugin-subscriptions` 注册的 `codex` 会自动归一化为 `openai-codex`，并按内置的 OpenAI 标准 API Token 参考价进入个人账本和月额度判断。这个金额只是面向客户的内部折算，不是 ChatGPT 订阅之外的实际账单；`gpt-5.3-codex-spark` 因无独立公开价格而沿用 `gpt-5.3-codex` 单价。显式 `pricing` 仍可覆盖任一模型的内部单价。
+`dsh-plugin-subscriptions` 注册的 `codex` 会自动归一化为 `openai-codex`；`gpt-5.5`、`gpt-5.4`、`gpt-5.4-mini` 和 `gpt-5.3-codex-spark` 上报的 Token 用量均按内置参考价进入个人账本和月额度判断。这个金额只是面向客户的内部折算，不是 ChatGPT 订阅之外的实际账单；`gpt-5.3-codex-spark` 因无独立公开价格而沿用 `gpt-5.3-codex` 单价。显式 `pricing` 仍可覆盖任一模型的内部单价。
 
 管理员可在 Spend 面板“调用明细 → 计费单价”中为任意 provider/model 新增或编辑内部价格，按面板当前币种填写每百万 Token 的输入、输出、缓存读取和缓存写入价格。自定义价格持久化在同一 SQLite 账本中，优先级高于配置和内置知识库并立即用于新调用；未计价历史会自动补价，已计价历史保持原价格版本。子账号只能查看费率，不能新增、修改或删除。
 
-`usageStats/query` 从宿主的已验证请求上下文取得身份，忽略浏览器声称的身份。普通用户的面板与 CSV/JSON/调用明细导出只包含自己的调用；管理员默认查看全部，也可在面板选择“仅管理员”或指定子账号，服务端再按 `principalId` 隔离统计。匿名调用被拒绝。内部 `spendAccounting` 服务提供自然月已用金额、额度状态和按权限报告，供 `dsh-passwords` 在每个模型步骤前同步检查。
+`usageStats/query` 从宿主已认证 `/api` 连接取得身份，忽略浏览器声称的身份。普通用户的面板与 CSV/JSON/调用明细导出只包含自己的调用；管理员默认查看全部，也可在面板选择“仅管理员”或指定子账号，服务端再按 `principalId` 隔离统计。匿名调用被拒绝。直接注册的 RPC 路由不依赖 Typert 自动发现，因此本地 `link:` 安装与发布包行为一致。内部 `spendAccounting` 服务提供自然月已用金额、额度状态和按权限报告，供 `dsh-passwords` 在每个模型步骤前同步检查。
 
 自然月固定按 `Asia/Shanghai` 计算。`dsh-passwords` 会向本插件注册当前账号的月额度解析器，Spend 面板和悬浮预览实时显示该账号的人民币剩余额度；额度修改不会被统计缓存冻结。`monthlyBudget` 仅是部署总预算的展示值，不参与个人额度门控；订阅固定月费也不分摊到个人账本。
 
@@ -82,8 +82,8 @@
 
 ## 工作原理
 
-- 服务端插件（`lib/index.js`）注册为 Typert Remote 服务 `usageStats`（通过网关的 SRC 发现机制，无需生成描述符文件）。
-- 浏览器端（`lib/client.js`）不走 typert 命名空间，直接以 `ctx.connection.rpc.call("/api", "usageStats/query", ...)` 调用宿主网关（与生成的 Remote 命名空间同一载体），因此无需在 inject 中声明由插件自身创建的命名空间。
+- 服务端插件（`lib/index.js`）在宿主的已认证 `/api` 连接上注册 `usageStats/*` RPC，并使用连接传入的已验证身份。
+- 浏览器端（`lib/client.js`）以 `ctx.connection.rpc.call("/api", "usageStats/query", ...)` 调用同一连接，无需生成 Typert 描述符。
 - 悬浮窗口通过插件自己的 React root 挂在 `document.body` 上（`position: fixed; right: 20px; bottom: 20px`），卸载时自动移除。
 - 直接回放 `$DSH_HOME/sessions` 下所有会话的持久化日志（zstd 分帧逐帧解码），按 token-meter 的语义聚合：`assistant/chunk` 的 usage 为早期样本，`assistant/message` 的 usage 为同一 (turn, step) 的最终样本并**替换**早期样本，因此不会重复计数；当前内存中的活动会话事件也会合并进来。
 - 费用 = Σ(各桶 token × 对应单价 / 1e6)，单价解析**按提供商自动匹配**：先找 (provider, model) 精确行，再找通用 model 行，最后回退默认单价——因此每个 AI 提供商（如 opencode-go 与 openai-codex）都按其官方价目各自计费，互不干扰。
@@ -178,7 +178,7 @@ config:
 dsh-spend/
 ├── package.json        # 双端声明：dsh.client（web 平台 + 注入边）
 ├── lib/
-│   ├── index.js        # 服务端插件：UsageStatsService（Typert Remote）
+│   ├── index.js        # 服务端插件：UsageStatsService + 已认证 RPC
 │   ├── knowledge.js    # 供应商知识库：计划自动识别（Code/Token）
 │   ├── ledger.js       # SQLite 个人消费账本、管理员价格覆盖与额度服务
 │   ├── stats.js        # 纯回放/聚合/计费逻辑（可独立测试）

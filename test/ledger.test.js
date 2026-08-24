@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { Context } from "@deepseek-ai/cordis";
 import { SpendAccountingService, SpendLedger, priceUsageMicros, shanghaiMonth } from "../lib/ledger.js";
 import { foldSession } from "../lib/stats.js";
-import { assertPricingAdministrator, callsForPrincipal, normalizePricingOverride, planForDisplay, pricingForDisplay, principalOptionsFor, UsageStatsService } from "../lib/index.js";
+import { assertPricingAdministrator, callsForPrincipal, dispatchUsageStatsRpc, normalizePricingOverride, planForDisplay, pricingForDisplay, principalOptionsFor, UsageStatsService } from "../lib/index.js";
 import { autoPlanFor, autoRatesFor, normalizeProvider } from "../lib/knowledge.js";
 
 const alice = { source: "dsh-passwords", id: "1", username: "alice", role: "user" };
@@ -50,6 +50,19 @@ test("codex subscription calls use exact internal token rates", () => {
   });
   const codexRates = autoRatesFor("codex");
   assert.ok(codexRates.every((row) => row.provider === "codex" && row.auto === true));
+  const expectedInputMicros = new Map([
+    ["gpt-5.5", 36_000_000],
+    ["gpt-5.4", 18_000_000],
+    ["gpt-5.4-mini", 5_400_000],
+    ["gpt-5.3-codex-spark", 12_600_000],
+  ]);
+  for (const [model, amountMicros] of expectedInputMicros) {
+    assert.equal(priceUsageMicros(call({
+      provider: "codex",
+      model,
+      inputTokens: 1_000_000,
+    }), codexRates, 7.2).amountMicros, amountMicros, model);
+  }
   assert.deepEqual(priceUsageMicros(call({
     provider: "codex",
     model: "gpt-5.3-codex-spark",
@@ -128,18 +141,22 @@ test("pricing mutation endpoints enforce admin authority and refresh accounting"
     cacheReadPerMillion: 0.72, cacheWritePerMillion: 9,
   };
   const rejected = {
-    ctx: { typertGateway: { currentPrincipal: () => alice } },
     usdCnyRate: 7.2,
   };
-  await assert.rejects(UsageStatsService.prototype.savePricing.call(rejected, request), /administrator permission/);
-  await assert.rejects(UsageStatsService.prototype.deletePricing.call(rejected, request), /administrator permission/);
+  await assert.rejects(
+    UsageStatsService.prototype.savePricingForPrincipal.call(rejected, request, alice),
+    /administrator permission/,
+  );
+  await assert.rejects(
+    UsageStatsService.prototype.deletePricingForPrincipal.call(rejected, request, alice),
+    /administrator permission/,
+  );
 
   let saved;
   let deleted;
   let reconciled = 0;
   const admin = { source: "dsh-passwords", id: "9", username: "owner", role: "admin" };
   const service = {
-    ctx: { typertGateway: { currentPrincipal: () => admin } },
     usdCnyRate: 7.2,
     currency: "CNY",
     cache: new Map([["old", {}]]),
@@ -149,15 +166,57 @@ test("pricing mutation endpoints enforce admin authority and refresh accounting"
     },
     accounting: { reconcile: async () => { reconciled++; } },
   };
-  const result = await UsageStatsService.prototype.savePricing.call(service, request);
+  const result = await UsageStatsService.prototype.savePricingForPrincipal.call(service, request, admin);
   assert.equal(saved.provider, "private");
   assert.equal(saved.inputPerMillion, 1);
   assert.equal(result.inputPerMillion, 7.2);
   assert.equal(reconciled, 1);
   assert.equal(service.cache.size, 0);
-  assert.deepEqual(await UsageStatsService.prototype.deletePricing.call(service, request), { removed: true });
+  assert.deepEqual(
+    await UsageStatsService.prototype.deletePricingForPrincipal.call(service, request, admin),
+    { removed: true },
+  );
   assert.deepEqual(deleted, ["private", "new-model"]);
   assert.equal(reconciled, 2);
+});
+
+test("direct Spend RPC uses the Host principal and rejects anonymous or child mutations", async () => {
+  const admin = { source: "dsh-passwords", id: "9", username: "owner", role: "admin" };
+  const calls = [];
+  const service = {
+    queryForPrincipal: async (request, principal) => {
+      calls.push(["query", request, principal]);
+      return { principalId: principal.id };
+    },
+    savePricingForPrincipal: async (request, principal) => {
+      assertPricingAdministrator(principal);
+      calls.push(["savePricing", request, principal]);
+      return request;
+    },
+    deletePricingForPrincipal: async (request, principal) => {
+      assertPricingAdministrator(principal);
+      calls.push(["deletePricing", request, principal]);
+      return request;
+    },
+  };
+
+  assert.deepEqual(
+    await dispatchUsageStatsRpc(service, "query", { args: { request: {} } }, alice),
+    { principalId: alice.id },
+  );
+  await assert.rejects(
+    dispatchUsageStatsRpc(service, "query", { args: { request: {} } }, undefined),
+    /authenticated principal/,
+  );
+  await assert.rejects(
+    dispatchUsageStatsRpc(service, "savePricing", { args: { request: {} } }, alice),
+    /administrator permission/,
+  );
+  await dispatchUsageStatsRpc(service, "deletePricing", { args: { request: { provider: "p", model: "m" } } }, admin);
+  assert.deepEqual(calls.map(([method, , principal]) => [method, principal.id]), [
+    ["query", alice.id],
+    ["deletePricing", admin.id],
+  ]);
 });
 
 test("CNY display converts rates, schedules, subscriptions and monetary quotas", () => {

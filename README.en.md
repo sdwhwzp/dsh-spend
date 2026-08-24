@@ -27,11 +27,11 @@ Ledger amounts use integer CNY micros (`¥1 = 1,000,000 micros`). Configured pri
 
 Personal charging accepts only an exact provider/model row or an explicit generic model row. An unmatched model is recorded as unpriced, warns once and has amount 0; after an administrator adds an exact rate, another scan can price it. `defaultPricing` is never used for a personal debit. The legacy dashboard may still use that fallback for an estimate, but the estimate does not participate in `dsh-passwords` personal allowance enforcement.
 
-The `codex` route registered by `dsh-plugin-subscriptions` normalizes to `openai-codex` and enters the personal ledger and monthly allowance checks at the built-in standard OpenAI API token reference rates. This is an internal customer allocation, not an additional bill beyond the ChatGPT subscription; `gpt-5.3-codex-spark` inherits the `gpt-5.3-codex` rate because no separate public price exists. Explicit `pricing` can still override any model's internal rate.
+The `codex` route registered by `dsh-plugin-subscriptions` normalizes to `openai-codex`; provider-reported usage for `gpt-5.5`, `gpt-5.4`, `gpt-5.4-mini`, and `gpt-5.3-codex-spark` enters the personal ledger and monthly allowance checks at the built-in token reference rates. This is an internal customer allocation, not an additional bill beyond the ChatGPT subscription; `gpt-5.3-codex-spark` inherits the `gpt-5.3-codex` rate because no separate public price exists. Explicit `pricing` can still override any model's internal rate.
 
 Administrators can add or edit an internal price for any provider/model under Spend → Call details → Rates, entering per-million input, output, cache-read and cache-write prices in the dashboard's current currency. Custom prices persist in the same SQLite ledger, override configured and built-in knowledge-base rates, and apply to new calls immediately; unpriced history is backfilled while already priced history retains its recorded price version. Subaccounts can view rates but cannot add, change, or delete them.
 
-`usageStats/query` reads identity from the Host's verified request context and ignores browser identity claims. An ordinary user's dashboard and CSV/JSON/call-log exports contain only that user's calls. Administrators see all calls by default and can select only themselves or one subaccount in the dashboard, after which the server isolates statistics by `principalId`. Anonymous calls are rejected. The internal `spendAccounting` service exposes natural-month usage, allowance status and authorized reports for the per-model-step check in `dsh-passwords`.
+`usageStats/query` reads identity from the Host's authenticated `/api` connection and ignores browser identity claims. An ordinary user's dashboard and CSV/JSON/call-log exports contain only that user's calls. Administrators see all calls by default and can select only themselves or one subaccount in the dashboard, after which the server isolates statistics by `principalId`. Anonymous calls are rejected. The directly registered RPC route does not depend on Typert discovery, so local `link:` installs behave like published packages. The internal `spendAccounting` service exposes natural-month usage, allowance status and authorized reports for the per-model-step check in `dsh-passwords`.
 
 Natural months always use `Asia/Shanghai`. `dsh-passwords` registers the current account's allowance resolver with this plugin, so the Spend dashboard and hover preview show that account's remaining CNY allowance without pinning policy changes in the statistics cache. `monthlyBudget` is a deployment-wide display value only and never gates a personal allowance; fixed subscription fees are not allocated to personal ledgers.
 
@@ -82,8 +82,8 @@ Provider ids are normalized through an alias table (`glm`→zhipu, `kimi`→moon
 
 ## How it works
 
-- The host plugin (`lib/index.js`) registers a Typert Remote service `usageStats` (discovered by the gateway's SRC reflection — no generated descriptor files).
-- The browser half (`lib/client.js`) bypasses typert namespaces and calls the host gateway directly with `ctx.connection.rpc.call("/api", "usageStats/query", ...)` — the same carrier generated namespaces use, so no inject declaration for a self-created namespace is needed.
+- The host plugin (`lib/index.js`) registers `usageStats/*` RPCs on the Host's authenticated `/api` connection and uses the verified principal supplied by that connection.
+- The browser half (`lib/client.js`) calls the same connection with `ctx.connection.rpc.call("/api", "usageStats/query", ...)`; no generated Typert descriptor is required.
 - The floating widget renders through its own React root on `document.body` (`position: fixed; right: 20px; bottom: 20px`) and is removed on plugin unload.
 - Session logs under `$DSH_HOME/sessions` are replayed frame by frame (zstd) using the same semantics as the harness token-meter: `assistant/chunk` usage is an early sample, the `assistant/message` usage is the final sample for the same (turn, step) and **replaces** it, so nothing is double-counted; in-memory live-session events are merged on top.
 - Cost = Σ(bucket tokens × rate / 1e6); rates resolve **per provider**: exact (provider, model) row → generic model row → default fallback.
@@ -177,7 +177,7 @@ Cost = Σ(bucket tokens × rate / 1e6). **The table shows the pre-2026-08-17 leg
 dsh-spend/
 ├── package.json        # dual-face declaration: dsh.client (web platform + inject edges)
 ├── lib/
-│   ├── index.js        # host plugin: UsageStatsService (Typert Remote)
+│   ├── index.js        # host plugin: UsageStatsService + authenticated RPC
 │   ├── knowledge.js    # provider knowledge base: plan auto-detection (Code/Token)
 │   ├── ledger.js       # SQLite personal ledger, administrator price overrides and allowance service
 │   ├── stats.js        # pure replay / aggregation / pricing logic (unit-testable)
