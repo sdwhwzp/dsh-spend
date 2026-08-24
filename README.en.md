@@ -159,13 +159,14 @@ Cost = Σ(bucket tokens × rate / 1e6). **The table shows the pre-2026-08-17 leg
 |---|---|---|---|---|
 | deepseek-v4-flash | $0.14 | $0.0028 | 0* | $0.28 |
 | deepseek-v4-pro | $0.435 | $0.003625 | 0* | $0.87 |
+| deepseek-v4-flash-vision-exp | $0.435 | $0.003625 | 0* | $0.87 |
 | gpt-5.6-sol | $5.00 | $0.50 | $6.25 | $30.00 |
 | gpt-5.6-terra | $2.00 | $0.20 | $2.50 | $12.00 |
 | gpt-5.6-luna | $0.20 | $0.02 | $0.25 | $1.20 |
 
 - DeepSeek: [official pricing](https://api-docs.deepseek.com/quick_start/pricing/) (fetched 2026-08-14). \*DeepSeek's disk cache is automatic and has **no separate cache-write line item**, hence `cacheWritePerMillion: 0`.
 - OpenAI: [official pricing](https://platform.openai.com/docs/pricing) (after the 2026-07-30 cuts); cache writes bill at 1.25× uncached input. Luna is down 80% ($1→$0.20 input / $6→$1.20 output).
-- ⚡ **DeepSeek peak/off-peak pricing is built in** (effective 2026-08-17 00:00 +08:00; peak 09:00–12:00 / 14:00–18:00 local time, off-peak at half price): v4-flash peak $0.014 (hit) / $0.44 (miss) / $1.32 (output), off-peak halved; v4-pro peak $0.044 / $1.32 / $3.96, off-peak halved. A pricing row can carry a `schedule` (`effectiveAt` + `peakHours` + `peak`/`offPeak` rates) — **each call is priced by its own timestamp**: legacy rates before 8/17, peak/off-peak after; historical calls are never re-priced (rate table rows show a "peak/off-peak" badge).
+- ⚡ **DeepSeek peak/off-peak pricing is built in** (effective 2026-08-17 00:00 +08:00; peak 09:00–12:00 / 14:00–18:00 local time, off-peak at half price): v4-flash peak $0.014 (hit) / $0.44 (miss) / $1.32 (output), off-peak halved; v4-pro peak $0.044 / $1.32 / $3.96, off-peak halved. The experimental `deepseek-v4-flash-vision-exp` route follows the complete v4-pro legacy and scheduled rate as an internal policy until DeepSeek publishes a distinct price. A pricing row can carry a `schedule` (`effectiveAt` + `peakHours` + `peak`/`offPeak` rates) — **each call is priced by its own timestamp**: legacy rates before 8/17, peak/off-peak after; historical calls are never re-priced (rate table rows show a "peak/off-peak" badge).
 - ⚠️ **OpenCode Go is subscription-based** (not token-billed): usage consumes the $10/month dollar quota (5h $12 / week $30 / month $60) instead of the token rates above — the "token estimate" is only a relative reference; real spend is the "estimated monthly spend" and the plan cards.
 - If your provider bills through a proxy (not the official endpoint), override the model rates to match the proxy's actual billing.
 

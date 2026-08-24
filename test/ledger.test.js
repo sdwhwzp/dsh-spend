@@ -82,6 +82,30 @@ test("codex subscription calls use exact internal token rates", () => {
   });
 });
 
+test("DeepSeek vision experimental calls use the V4 Pro internal rate", () => {
+  const rates = autoRatesFor("deepseek-official");
+  const pro = rates.find((row) => row.model === "deepseek-v4-pro");
+  const vision = rates.find((row) => row.model === "deepseek-v4-flash-vision-exp");
+  assert.ok(pro);
+  assert.ok(vision);
+  assert.deepEqual(
+    { ...vision, model: "deepseek-v4-pro" },
+    pro,
+  );
+
+  for (const time of [
+    Date.parse("2026-08-16T12:00:00+08:00"),
+    Date.parse("2026-08-20T10:00:00+08:00"),
+    Date.parse("2026-08-20T20:00:00+08:00"),
+  ]) {
+    const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, time };
+    assert.equal(
+      priceUsageMicros(call({ ...usage, provider: "deepseek-official", model: vision.model }), rates, 7.2).amountMicros,
+      priceUsageMicros(call({ ...usage, provider: "deepseek-official", model: pro.model }), rates, 7.2).amountMicros,
+    );
+  }
+});
+
 test("durable turn/step principals survive shared-session folding", () => {
   const events = [
     { type: "turn/start", time: 1, data: { turn: 1, principal: alice } },
