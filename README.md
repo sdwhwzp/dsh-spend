@@ -51,7 +51,7 @@
 
 ## 供应商自动识别（无需配置）
 
-插件内置**供应商知识库**（`lib/knowledge.js`，2026-08-14 官方文档核实）：**17 个供应商 / 131 个模型价格**，provider id 自动归一化别名（`glm`→zhipu、`kimi`→moonshot、`dashscope`→qwen、`gemini`→google、`grok`→xai、`claude`→anthropic、`copilot`→github-copilot 等）。
+插件内置**供应商知识库**（`lib/knowledge.js`，2026-08-27 官方文档核实）：**17 个供应商 / 159 个模型价格**，provider id 自动归一化别名（`zai` / `z-ai` / `glm`→zhipu、`kimi`→moonshot、`dashscope`→qwen、`gemini`→google、`grok`→xai、`claude`→anthropic、`copilot`→github-copilot 等）。
 
 **订阅制（Code 计划）— 自动识别档位费与额度：**
 
@@ -73,12 +73,14 @@
 | xAI（`xai`） | grok-4.6、4.5、4.3、build-0.1 |
 | Mistral（`mistral`） | large-3、medium-3.5、small-4、ministral-3 |
 | Moonshot（`moonshot`） | kimi-k3、k2.7-code |
-| 智谱（`zhipu`） | glm-5.2、5.1、5 |
+| 智谱（`zhipu`，兼容 `zai` / `z-ai` / `glm`） | GLM-5.3-Flash、5.2、5.1、5-Turbo、5V-Turbo、5、4.7、4.5 |
 | 阿里（`qwen`） | qwen3.8-max、3.7-max/plus/flash |
 | MiniMax（`minimax`） | m3、m2.7 |
 | OpenRouter（`openrouter`） | 实时目录 50 个热门模型 |
 | OpenCode Zen（`opencode-zen`） | PAYG 网关价（Claude/GPT/Gemini/Grok/DeepSeek） |
 | DeepSeek（`deepseek`） | v4-flash、v4-pro |
+
+GLM-5.3-Flash 按官方 5 折活动价计费至 2026-09-09 24:00（UTC+8），之后自动切换为原价；历史调用始终按各自发生时间对应的价格计算。
 
 - 日志中出现的提供商**自动匹配**知识库生成计划与价格（UI 标记"自动识别"）；模型选择菜单还会按当前可见目录查询全部模型的精确价格，显式 `plans` / `pricing` 配置始终覆盖自动识别。
 - **费用口径**：Code 计划按**订阅费**、Token 计划按**估算用量**计入「预计花费（月）」；"按 token 估算"仍单独展示，用于对比。
@@ -140,7 +142,7 @@ config:
   syncIntervalHours: 24    # 后台模型用量对账与模型价表同步间隔（小时，>= 1）
   ledgerPath: /var/lib/dsh/spend-ledger.sqlite
   usdCnyRate: 7.2          # 仪表盘与个人账本共用的固定 USD/CNY 汇率
-  priceVersion: 2026-08-22
+  priceVersion: 2026-08-27
   fxVersion: fixed-2026-08-21
   monthlyBudget: 50        # 可选部署总预算展示，不参与个人额度判断
   plans:                   # 计费计划：判断 Token Plan / Code Plan 并展示使用量与剩余量
@@ -158,7 +160,7 @@ config:
 > Token Plan 的「剩余」= 配置的充值余额 − 累计已用费用；Code Plan 的「剩余」= 额度 − 周期内实际消耗。
 > 未配置 `plans` 的提供商不显示计划卡片（默认按 token 计费口径展示费用）。
 
-### 价格来源（2026-08-14 官网查证）
+### 价格来源（2026-08-27 官网查证）
 
 单价均来自厂商官方定价页，已写入本地配置；`费用 = Σ(各桶 token × 对应单价 / 1e6)`。**下表为 2026-08-17 前的 legacy 价**；8/17 起 DeepSeek 自动按峰谷价计价（见下方 ⚡ 说明，provider 为 `deepseek` 或 `deepseek-official` 时均生效）：
 
@@ -173,6 +175,7 @@ config:
 
 - DeepSeek：[官方定价页](https://api-docs.deepseek.com/quick_start/pricing/)（2026-08-14 抓取）。\*DeepSeek 的上下文硬盘缓存自动生效、**无单独缓存写入计费项**，故 `cacheWritePerMillion: 0`。
 - OpenAI：[官方定价页](https://platform.openai.com/docs/pricing)（2026-07-30 降价后），缓存写 = 未命中输入 × 1.25。Luna 已降 80%（$1→$0.20 输入 / $6→$1.20 输出）。
+- 智谱 GLM：[Z.AI 官方定价页](https://docs.z.ai/guides/overview/pricing)，`zai` / `z-ai` / `glm` provider 自动匹配智谱价表；缓存存储当前限时免费，因此缓存写为 0。
 - ⚡ **DeepSeek 峰谷计价已内置**（2026-08-17 00:00 北京时间生效；高峰 09:00–12:00 / 14:00–18:00 本地时间，其余空闲为高峰一半）：v4-flash 高峰 $0.014(命中)/$0.44(未命中)/$1.32(输出)、空闲减半；v4-pro 高峰 $0.044/$1.32/$3.96、空闲减半。实验视觉路由 `deepseek-v4-flash-vision-exp` 按内部策略完全沿用 v4-pro 的 legacy 与峰谷价格，直到 DeepSeek 公布独立价格。计价行可带 `schedule`（`effectiveAt` + `peakHours` + `peak`/`offPeak` 价格），**每条调用按自身发生时刻与时段计价**——8/17 前按上表 legacy 价，之后按峰谷价，历史调用不重算（计费单价表中带"峰谷计价"徽章）。
 - ⚠️ **OpenCode Go 是订阅制**（非按 token 计费）：其用量不按上表 token 单价扣费，而是消耗 $10/月订阅的美元额度（5h $12 / 周 $30 / 月 $60）——「按 token 估算」仅作相对占比参考，真实花费看「预计花费（月）」与计划卡片。
 - 若你的 provider 经代理中转计费（非官方直连），请按代理实际账单覆盖对应模型的单价。

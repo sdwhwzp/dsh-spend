@@ -16,7 +16,7 @@
         refreshSeconds: 30       # floating-window auto-refresh interval (s)
         syncIntervalHours: 24    # background usage reconciliation and model-price refresh cadence
         usdCnyRate: 7.2          # fixed FX used by the dashboard and principal ledger
-        priceVersion: '2026-08-22'
+        priceVersion: '2026-08-27'
         fxVersion: 'fixed-2026-08-21'
         # pricing: [...]         # optional explicit per-model rates (overrides auto-detection)
         # plans: [...]           # optional explicit billing plans (overrides auto-detection)

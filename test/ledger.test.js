@@ -82,6 +82,40 @@ test("codex subscription calls use exact internal token rates", () => {
   });
 });
 
+test("zai provider prices every GLM model visible on server 28", () => {
+  assert.equal(normalizeProvider("zai"), "zhipu");
+  assert.equal(normalizeProvider("z-ai"), "zhipu");
+  const rates = autoRatesFor("zai");
+  assert.ok(rates.every((row) => row.provider === "zai" && row.auto === true));
+  const expected = new Map([
+    ["glm-5-turbo", { input: 1.2, cacheRead: 0.24, output: 4 }],
+    ["glm-5.1", { input: 1.4, cacheRead: 0.26, output: 4.4 }],
+    ["glm-5.2", { input: 1.4, cacheRead: 0.26, output: 4.4 }],
+    ["glm-5v-turbo", { input: 1.2, cacheRead: 0.24, output: 4 }],
+    ["GLM-5.3-Flash", { input: 0.075, cacheRead: 0.015, output: 0.25 }],
+  ]);
+  for (const [model, price] of expected) {
+    const row = rates.find((candidate) => candidate.model === model);
+    assert.ok(row, model);
+    assert.deepEqual({
+      input: row.inputPerMillion,
+      cacheRead: row.cacheReadPerMillion,
+      cacheWrite: row.cacheWritePerMillion,
+      output: row.outputPerMillion,
+    }, { ...price, cacheWrite: 0 }, model);
+  }
+  assert.equal(priceUsageMicros(call({
+    provider: "zai",
+    model: "GLM-5.3-Flash",
+    time: Date.parse("2026-09-09T23:59:59+08:00"),
+  }), rates, 7.2).amountMicros, 540_000);
+  assert.equal(priceUsageMicros(call({
+    provider: "zai",
+    model: "GLM-5.3-Flash",
+    time: Date.parse("2026-09-10T00:00:00+08:00"),
+  }), rates, 7.2).amountMicros, 1_080_000);
+});
+
 test("DeepSeek vision experimental calls use the V4 Pro internal rate", () => {
   const rates = autoRatesFor("deepseek-official");
   const pro = rates.find((row) => row.model === "deepseek-v4-pro");
@@ -383,13 +417,18 @@ test("direct Spend RPC registers on its required Host Connection", async () => {
 test("CNY display converts rates, schedules, subscriptions and monetary quotas", () => {
   const source = [{
     model: "exact", inputPerMillion: 1, outputPerMillion: 2,
-    schedule: { peak: { inputPerMillion: 3 }, offPeak: { outputPerMillion: 4 } },
+    schedule: {
+      peak: { inputPerMillion: 3 },
+      offPeak: { outputPerMillion: 4 },
+      after: { cacheReadPerMillion: 0.25 },
+    },
   }];
   const converted = pricingForDisplay(source, { inputPerMillion: 0.5 }, "CNY", 7.2);
   assert.equal(converted.pricing[0].inputPerMillion, 7.2);
   assert.equal(converted.pricing[0].outputPerMillion, 14.4);
   assert.equal(converted.pricing[0].schedule.peak.inputPerMillion, 21.6);
   assert.equal(converted.pricing[0].schedule.offPeak.outputPerMillion, 28.8);
+  assert.equal(converted.pricing[0].schedule.after.cacheReadPerMillion, 1.8);
   assert.equal(converted.defaultPricing.inputPerMillion, 3.6);
   assert.equal(source[0].inputPerMillion, 1);
 

@@ -49,7 +49,7 @@ The dashboard defaults to CNY. Rate rows remain USD per million tokens; the host
 
 ## Provider auto-detection (zero configuration)
 
-A built-in **provider knowledge base** (`lib/knowledge.js`, verified against official docs on 2026-08-14) covering **17 providers / 131 model rate cards**:
+A built-in **provider knowledge base** (`lib/knowledge.js`, verified against official docs on 2026-08-27) covering **17 providers / 159 model rate cards**:
 
 **Subscription (Code) plans — auto-detected with fees and quotas:**
 
@@ -71,14 +71,16 @@ A built-in **provider knowledge base** (`lib/knowledge.js`, verified against off
 | xAI (`xai`) | grok-4.6, 4.5, 4.3, build-0.1 |
 | Mistral (`mistral`) | large-3, medium-3.5, small-4, ministral-3 |
 | Moonshot (`moonshot`) | kimi-k3, k2.7-code |
-| Zhipu (`zhipu`) | glm-5.2, 5.1, 5 |
+| Zhipu (`zhipu`, including `zai` / `z-ai` / `glm`) | GLM-5.3-Flash, 5.2, 5.1, 5-Turbo, 5V-Turbo, 5, 4.7, 4.5 |
 | Alibaba (`qwen`) | qwen3.8-max, 3.7-max/plus/flash |
 | MiniMax (`minimax`) | m3, m2.7 |
 | OpenRouter (`openrouter`) | 50 live-catalog models |
 | OpenCode Zen (`opencode-zen`) | PAYG gateway rates (Claude/GPT/Gemini/Grok/DeepSeek) |
 | DeepSeek (`deepseek`) | v4-flash, v4-pro |
 
-Provider ids are normalized through an alias table (`glm`→zhipu, `kimi`→moonshot, `dashscope`→qwen, `gemini`→google, `grok`→xai, `claude`→anthropic, `copilot`→github-copilot, …).
+Provider ids are normalized through an alias table (`zai` / `z-ai` / `glm`→zhipu, `kimi`→moonshot, `dashscope`→qwen, `gemini`→google, `grok`→xai, `claude`→anthropic, `copilot`→github-copilot, …).
+
+GLM-5.3-Flash uses the official 50%-off promotional rate through 2026-09-09 24:00 (UTC+8), then switches to the list rate automatically. Historical calls always use the rate effective at their own occurrence time.
 
 - Providers that appear in your session logs are **matched against the knowledge base automatically** (badged "auto" in the UI); the model menu also resolves exact rates for every route in the current visible catalog. An explicit `plans` config always overrides auto-detection, and explicit `pricing` rows override knowledge-base rates.
 - **Cost model**: Code plans count their **subscription fee**, Token plans their **estimated usage**, into the "estimated monthly spend"; the raw "token estimate" stays visible for comparison.
@@ -140,7 +142,7 @@ config:
   syncIntervalHours: 24    # background usage reconciliation and model-rate sync interval (hours, >= 1)
   ledgerPath: /var/lib/dsh/spend-ledger.sqlite
   usdCnyRate: 7.2          # fixed USD/CNY rate shared by dashboard and ledger
-  priceVersion: 2026-08-22
+  priceVersion: 2026-08-27
   fxVersion: fixed-2026-08-21
   monthlyBudget: 50        # optional deployment-wide display; not a personal gate
   plans:                   # billing plans: Token Plan / Code Plan with usage & remaining
@@ -157,7 +159,7 @@ config:
 > Token Plan "remaining" = configured prepaid balance − accumulated estimated cost; Code Plan "remaining" = quota − actual consumption in the period.
 > Providers without a `plans` entry show no plan card (their cost is still shown in the by-provider table).
 
-### Rate sources (verified from official pages, 2026-08-14)
+### Rate sources (verified from official pages, 2026-08-27)
 
 Cost = Σ(bucket tokens × rate / 1e6). **The table shows the pre-2026-08-17 legacy rates**; from 8/17 DeepSeek is priced automatically with the peak/off-peak schedule (see the note below — works for both `deepseek` and `deepseek-official` providers):
 
@@ -172,6 +174,7 @@ Cost = Σ(bucket tokens × rate / 1e6). **The table shows the pre-2026-08-17 leg
 
 - DeepSeek: [official pricing](https://api-docs.deepseek.com/quick_start/pricing/) (fetched 2026-08-14). \*DeepSeek's disk cache is automatic and has **no separate cache-write line item**, hence `cacheWritePerMillion: 0`.
 - OpenAI: [official pricing](https://platform.openai.com/docs/pricing) (after the 2026-07-30 cuts); cache writes bill at 1.25× uncached input. Luna is down 80% ($1→$0.20 input / $6→$1.20 output).
+- Zhipu GLM: [official Z.AI pricing](https://docs.z.ai/guides/overview/pricing); `zai` / `z-ai` / `glm` providers automatically use the Zhipu rate table. Cached-input storage is currently free for a limited time, so cache write is zero.
 - ⚡ **DeepSeek peak/off-peak pricing is built in** (effective 2026-08-17 00:00 +08:00; peak 09:00–12:00 / 14:00–18:00 local time, off-peak at half price): v4-flash peak $0.014 (hit) / $0.44 (miss) / $1.32 (output), off-peak halved; v4-pro peak $0.044 / $1.32 / $3.96, off-peak halved. The experimental `deepseek-v4-flash-vision-exp` route follows the complete v4-pro legacy and scheduled rate as an internal policy until DeepSeek publishes a distinct price. A pricing row can carry a `schedule` (`effectiveAt` + `peakHours` + `peak`/`offPeak` rates) — **each call is priced by its own timestamp**: legacy rates before 8/17, peak/off-peak after; historical calls are never re-priced (rate table rows show a "peak/off-peak" badge).
 - ⚠️ **OpenCode Go is subscription-based** (not token-billed): usage consumes the $10/month dollar quota (5h $12 / week $30 / month $60) instead of the token rates above — the "token estimate" is only a relative reference; real spend is the "estimated monthly spend" and the plan cards.
 - If your provider bills through a proxy (not the official endpoint), override the model rates to match the proxy's actual billing.
