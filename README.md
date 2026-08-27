@@ -25,7 +25,7 @@
 
 ## 按用户计费账本与访问控制
 
-插件同时维护一个独立 SQLite 消费账本。只接收带认证 principal 的最终 `assistant/message` usage，以 `(sessionId, turn, step)` 为唯一键；实时事件、日志重放和进程重启不会重复扣费。共享 Session 中每个 turn/step 使用其耐久事件上的消息身份，用户 A 与用户 B 不会串账。
+插件同时维护一个独立 SQLite 消费账本。只接收带认证 principal 的最终 `assistant/message` usage，以 `(sessionId, turn, step)` 为唯一键；实时事件、日志重放和进程重启不会重复扣费。共享 Session 中每个 turn/step 使用其耐久事件上的消息身份，用户 A 与用户 B 不会串账。旧版 agent-loop 未把 principal 写入 turn/step 时，会从该 turn 内已认证的 `user/message` 回填身份后再入账。
 
 账本金额全部使用人民币微元整数（`¥1 = 1,000,000 micros`）。配置价格是 USD/百万 Token，并以固定 `usdCnyRate` 折算；每笔记录固化价格版本、汇率版本、输入/输出/缓存读写/推理 Token、命中的价表和人民币金额。已计价记录不会因以后改价而变化。
 

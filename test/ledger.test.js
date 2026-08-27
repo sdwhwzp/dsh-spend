@@ -154,6 +154,21 @@ test("durable turn/step principals survive shared-session folding", () => {
   assert.deepEqual(calls.map((entry) => [entry.turn, entry.principal.id, entry.final]), [[1, "1", true], [2, "2", true]]);
 });
 
+test("legacy logs recover each step owner from its authenticated user message", () => {
+  const events = [
+    { type: "turn/start", time: 1, data: { turn: 1 } },
+    { type: "step/start", time: 2, data: { turn: 1, step: 0 } },
+    { type: "user/message", time: 3, data: { role: "user", principal: alice, content: [] } },
+    { type: "assistant/message", time: 4, data: { turn: 1, step: 0, usage: { inputTokens: 10, outputTokens: 2 } } },
+    { type: "turn/start", time: 5, data: { turn: 2 } },
+    { type: "step/start", time: 6, data: { turn: 2, step: 0 } },
+    { type: "user/message", time: 7, data: { role: "user", principal: bob, content: [] } },
+    { type: "assistant/message", time: 8, data: { turn: 2, step: 0, usage: { inputTokens: 20, outputTokens: 3 } } },
+  ];
+  const calls = foldSession(events, { id: "legacy-shared", createdAt: 1 });
+  assert.deepEqual(calls.map((entry) => [entry.turn, entry.principal.id]), [[1, "1"], [2, "2"]]);
+});
+
 test("dashboard call scopes cannot be widened by an ordinary user", () => {
   const calls = [call({ turn: 1, principal: alice }), call({ turn: 2, principal: bob })];
   assert.deepEqual(callsForPrincipal(calls, alice, "2").map((entry) => entry.turn), [1]);
