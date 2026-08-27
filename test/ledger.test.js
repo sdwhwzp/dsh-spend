@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { Context } from "@deepseek-ai/cordis";
 import { SpendAccountingService, SpendLedger, priceUsageMicros, shanghaiMonth } from "../lib/ledger.js";
 import { foldSession } from "../lib/stats.js";
-import { assertPricingAdministrator, callsForPrincipal, dispatchUsageStatsRpc, normalizePricingOverride, planForDisplay, pricingForDisplay, principalOptionsFor, UsageStatsService } from "../lib/index.js";
+import { assertPricingAdministrator, callsForPrincipal, dispatchUsageStatsRpc, normalizePricingOverride, planDisclosureForPrincipal, planForDisplay, pricingForDisplay, principalOptionsFor, registerUsageStatsRpc, UsageStatsService } from "../lib/index.js";
 import { autoPlanFor, autoRatesFor, normalizeProvider } from "../lib/knowledge.js";
 
 const alice = { source: "dsh-passwords", id: "1", username: "alice", role: "user" };
@@ -243,6 +243,43 @@ test("direct Spend RPC uses the Host principal and rejects anonymous or child mu
   ]);
 });
 
+test("direct Spend RPC registers on its required Host Connection", async () => {
+  const principal = { source: "dsh-passwords", id: "9", username: "owner", role: "admin" };
+  const service = {
+    queryForPrincipal: async (request, received) => ({ request, principal: received }),
+  };
+  let registration;
+  let disposed = false;
+  let effectLabel;
+  const connection = {
+    rpc: {
+      intercept: (...args) => {
+        registration = args;
+        return () => { disposed = true; };
+      },
+    },
+  };
+  let disposer;
+  const ctx = {
+    get: (name) => name === "connection" ? connection : undefined,
+    effect: (activate, label) => {
+      effectLabel = label;
+      disposer = activate();
+    },
+  };
+
+  registerUsageStatsRpc(ctx, service);
+  assert.equal(effectLabel, "dsh-spend: /api/usageStats/* rpc endpoints");
+  assert.equal(registration[0], "/api");
+  assert.equal(registration[1]("usageStats/query"), true);
+  assert.deepEqual(
+    await registration[2]("usageStats/query", { args: { request: { cwd: "/work" } } }, undefined, principal),
+    { ok: true, value: { request: { cwd: "/work" }, principal } },
+  );
+  disposer();
+  assert.equal(disposed, true);
+});
+
 test("CNY display converts rates, schedules, subscriptions and monetary quotas", () => {
   const source = [{
     model: "exact", inputPerMillion: 1, outputPerMillion: 2,
@@ -264,6 +301,23 @@ test("CNY display converts rates, schedules, subscriptions and monetary quotas",
   assert.deepEqual(plan.subscription, { amount: 72, currency: "CNY", period: "month" });
   assert.equal(plan.dollarsPerMonth, 108);
   assert.deepEqual(plan.tiers[0].subscription, { amount: 144, currency: "CNY" });
+});
+
+test("subscription plan usage is disclosed only to administrators", () => {
+  const admin = { ...alice, role: "admin" };
+  const plans = [{ provider: "codex", type: "code", subscription: { amount: 144, currency: "CNY" } }];
+  const autoDiscovered = [{ provider: "codex", label: "OpenAI Codex", type: "code" }];
+  const plannedBillingParts = [{ provider: "codex", kind: "subscription", amount: 144, currency: "CNY" }];
+  const usageBillingParts = [{ provider: "codex", kind: "token", amount: 3.6, currency: "CNY" }];
+
+  assert.deepEqual(
+    planDisclosureForPrincipal(admin, plans, autoDiscovered, plannedBillingParts, usageBillingParts),
+    { plans, autoDiscovered, billingParts: plannedBillingParts },
+  );
+  assert.deepEqual(
+    planDisclosureForPrincipal(alice, plans, autoDiscovered, plannedBillingParts, usageBillingParts),
+    { plans: [], autoDiscovered: [], billingParts: usageBillingParts },
+  );
 });
 
 test("personal budget resolvers expose current remaining CNY allowance", async () => {
