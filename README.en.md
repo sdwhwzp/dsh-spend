@@ -19,6 +19,8 @@ A **floating usage widget** pinned to the bottom-right corner of the dsh Web UI:
 
 Data auto-refreshes every `refreshSeconds` (default 30s; the interval is driven by the server config, no frontend change needed) and can be refreshed manually from the panel.
 
+The model menu shows input, cache-read, cache-write and output rates in the current currency under every model name (per million tokens). The browser synchronizes the live visible-model catalog with Spend at startup, immediately after an administrator changes an internal rate, and every 24 hours. A route without an exact or generic model rate says “Unpriced”; the dashboard fallback is never presented as a personal-debit rate.
+
 ## Principal-scoped accounting ledger and access control
 
 The plugin also maintains a separate SQLite spend ledger. It accepts only final `assistant/message` usage carrying an authenticated principal and uses `(sessionId, turn, step)` as its unique key, so live events, log replay and process restarts cannot charge twice. Each turn/step in a shared Session uses the identity on its durable event; users A and B never share an account entry.
@@ -32,6 +34,8 @@ The `codex` route registered by `dsh-plugin-subscriptions` normalizes to `openai
 Administrators can add or edit an internal price for any provider/model under Spend → Call details → Rates, entering per-million input, output, cache-read and cache-write prices in the dashboard's current currency. Custom prices persist in the same SQLite ledger, override configured and built-in knowledge-base rates, and apply to new calls immediately; unpriced history is backfilled while already priced history retains its recorded price version. Subaccounts can view rates but cannot add, change, or delete them.
 
 `usageStats/query` reads identity from the Host's authenticated `/api` connection and ignores browser identity claims. An ordinary user's dashboard and CSV/JSON/call-log exports contain only that user's calls. Administrators see all calls by default and can select only themselves or one subaccount in the dashboard, after which the server isolates statistics by `principalId`. Anonymous calls are rejected. The directly registered RPC route does not depend on Typert discovery, so local `link:` installs behave like published packages. The internal `spendAccounting` service exposes natural-month usage, allowance status and authorized reports for the per-model-step check in `dsh-passwords`.
+
+The allowance check before each model call first synchronizes the latest model usage into the ledger. An independent full reconciliation also runs every `syncIntervalHours` (24 hours by default), even when nobody opens the Spend dashboard. The background scan yields between batches so a large session history does not block the Web service. The `(sessionId, turn, step)` idempotency key prevents a daily rescan from charging twice.
 
 Natural months always use `Asia/Shanghai`. `dsh-passwords` registers the current account's allowance resolver with this plugin, so the Spend dashboard and hover preview show that account's remaining CNY allowance without pinning policy changes in the statistics cache. `monthlyBudget` is a deployment-wide display value only and never gates a personal allowance; fixed subscription fees are not allocated to personal ledgers.
 
@@ -76,7 +80,7 @@ A built-in **provider knowledge base** (`lib/knowledge.js`, verified against off
 
 Provider ids are normalized through an alias table (`glm`→zhipu, `kimi`→moonshot, `dashscope`→qwen, `gemini`→google, `grok`→xai, `claude`→anthropic, `copilot`→github-copilot, …).
 
-- Providers that appear in your session logs are **matched against the knowledge base automatically** (badged "auto" in the UI); an explicit `plans` config always overrides auto-detection, and explicit `pricing` rows override knowledge-base rates.
+- Providers that appear in your session logs are **matched against the knowledge base automatically** (badged "auto" in the UI); the model menu also resolves exact rates for every route in the current visible catalog. An explicit `plans` config always overrides auto-detection, and explicit `pricing` rows override knowledge-base rates.
 - **Cost model**: Code plans count their **subscription fee**, Token plans their **estimated usage**, into the "estimated monthly spend"; the raw "token estimate" stays visible for comparison.
 - Plans without a published quota (e.g. Claude Code) show the tier table instead of a progress bar; quotas are measured over the official period (day/week/month).
 
@@ -84,6 +88,7 @@ Provider ids are normalized through an alias table (`glm`→zhipu, `kimi`→moon
 
 - The host plugin (`lib/index.js`) registers `usageStats/*` RPCs on the Host's authenticated `/api` connection and uses the verified principal supplied by that connection.
 - The browser half (`lib/client.js`) calls the same connection with `ctx.connection.rpc.call("/api", "usageStats/query", ...)`; no generated Typert descriptor is required.
+- The browser also reads the Host's `llm.models` catalog and asks `usageStats/catalogPricing` for matching rates; a lifecycle-owned observer adds the price row when model menus enter the DOM and removes it on unload.
 - The floating widget renders through its own React root on `document.body` (`position: fixed; right: 20px; bottom: 20px`) and is removed on plugin unload.
 - Session logs under `$DSH_HOME/sessions` are replayed frame by frame (zstd) using the same semantics as the harness token-meter: `assistant/chunk` usage is an early sample, the `assistant/message` usage is the final sample for the same (turn, step) and **replaces** it, so nothing is double-counted; in-memory live-session events are merged on top.
 - Cost = Σ(bucket tokens × rate / 1e6); rates resolve **per provider**: exact (provider, model) row → generic model row → default fallback.
@@ -132,6 +137,7 @@ config:
   maxRecentCalls: 50       # max recent calls
   seriesHours: 168         # time-series window in hours (zero-filled; UI offers 24h/72h/7d)
   refreshSeconds: 30       # auto-refresh interval in seconds (>= 5)
+  syncIntervalHours: 24    # background usage reconciliation and model-rate sync interval (hours, >= 1)
   ledgerPath: /var/lib/dsh/spend-ledger.sqlite
   usdCnyRate: 7.2          # fixed USD/CNY rate shared by dashboard and ledger
   priceVersion: 2026-08-22

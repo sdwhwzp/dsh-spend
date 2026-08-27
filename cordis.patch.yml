@@ -14,6 +14,7 @@
         maxRecentCalls: 50       # max recent calls
         seriesHours: 168         # time-series window in hours (zero-filled; UI offers 24h/72h/7d)
         refreshSeconds: 30       # floating-window auto-refresh interval (s)
+        syncIntervalHours: 24    # background usage reconciliation and model-price refresh cadence
         usdCnyRate: 7.2          # fixed FX used by the dashboard and principal ledger
         priceVersion: '2026-08-22'
         fxVersion: 'fixed-2026-08-21'

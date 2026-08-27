@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Context } from "@deepseek-ai/cordis";
 import { SpendAccountingService, SpendLedger, priceUsageMicros, shanghaiMonth } from "../lib/ledger.js";
 import { foldSession } from "../lib/stats.js";
-import { assertPricingAdministrator, callsForPrincipal, dispatchUsageStatsRpc, normalizePricingOverride, planDisclosureForPrincipal, planForDisplay, pricingForDisplay, principalOptionsFor, registerUsageStatsRpc, UsageStatsService } from "../lib/index.js";
+import { assertPricingAdministrator, callsForPrincipal, dispatchUsageStatsRpc, normalizeCatalogModels, normalizePricingOverride, planDisclosureForPrincipal, planForDisplay, pricingForDisplay, principalOptionsFor, registerDailyReconciliation, registerUsageStatsRpc, UsageStatsService } from "../lib/index.js";
 import { autoPlanFor, autoRatesFor, normalizeProvider } from "../lib/knowledge.js";
 
 const alice = { source: "dsh-passwords", id: "1", username: "alice", role: "user" };
@@ -204,6 +204,97 @@ test("pricing mutation endpoints enforce admin authority and refresh accounting"
   assert.equal(reconciled, 2);
 });
 
+test("catalog pricing covers every visible model and marks unknown routes unpriced", async () => {
+  assert.deepEqual(normalizeCatalogModels({ models: [
+    { provider: " codex ", model: "gpt-5.6-sol" },
+    { provider: "codex", model: "gpt-5.6-sol" },
+    { provider: "private", model: "unknown" },
+  ] }), [
+    { provider: "codex", model: "gpt-5.6-sol" },
+    { provider: "private", model: "unknown" },
+  ]);
+  assert.throws(() => normalizeCatalogModels({ models: [{ provider: "", model: "x" }] }), /provider/);
+
+  const service = {
+    currency: "CNY",
+    usdCnyRate: 7.2,
+    syncIntervalHours: 24,
+    pricingFor: () => [{
+      provider: "codex", model: "gpt-5.6-sol",
+      inputPerMillion: 5, outputPerMillion: 30,
+      cacheReadPerMillion: 0.5, cacheWritePerMillion: 6.25,
+    }],
+  };
+  const result = await UsageStatsService.prototype.catalogPricingForPrincipal.call(service, {
+    models: [
+      { provider: "codex", model: "gpt-5.6-sol" },
+      { provider: "private", model: "unknown" },
+    ],
+  }, alice);
+  assert.equal(result.currency, "CNY");
+  assert.equal(result.syncIntervalHours, 24);
+  assert.deepEqual(result.models, [
+    {
+      provider: "codex", model: "gpt-5.6-sol", priced: true,
+      inputPerMillion: 36, outputPerMillion: 216,
+      cacheReadPerMillion: 3.6, cacheWritePerMillion: 45,
+    },
+    { provider: "private", model: "unknown", priced: false },
+  ]);
+  await assert.rejects(
+    UsageStatsService.prototype.catalogPricingForPrincipal.call(service, { models: [] }, undefined),
+    /authenticated principal/,
+  );
+});
+
+test("daily reconciliation repeats every 24 hours and disposes with the plugin", async () => {
+  let reconcileCount = 0;
+  let intervalCallback;
+  let intervalMs;
+  let cleared = false;
+  let unrefCount = 0;
+  let disposer;
+  const timer = { unref: () => { unrefCount++; } };
+  const timers = {
+    setInterval: (callback, milliseconds) => {
+      intervalCallback = callback;
+      intervalMs = milliseconds;
+      return timer;
+    },
+    clearInterval: (value) => {
+      assert.equal(value, timer);
+      cleared = true;
+    },
+  };
+  const ctx = {
+    effect: (activate, label) => {
+      assert.equal(label, "dsh-spend: daily model usage reconciliation");
+      disposer = activate();
+    },
+  };
+  registerDailyReconciliation(ctx, { reconcile: async () => { reconcileCount++; } }, 24, timers);
+  await Promise.resolve();
+  assert.equal(reconcileCount, 0);
+  assert.equal(intervalMs, 24 * 60 * 60 * 1_000);
+  assert.equal(unrefCount, 1);
+  intervalCallback();
+  await Promise.resolve();
+  assert.equal(reconcileCount, 1);
+  disposer();
+  assert.equal(cleared, true);
+});
+
+test("browser client synchronizes catalog prices and decorates every model-menu row", () => {
+  const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
+  assert.match(source, /ctx\.connection\.api\.llm\.models\(\{\}\)/);
+  assert.match(source, /callUsageStats\(ctx, "catalogPricing", \{ models \}\)/);
+  assert.match(source, /MutationObserver\(decorate\)/);
+  assert.match(source, /data-dsh-spend-model-price/);
+  assert.match(source, /MODEL_PRICE_SYNC_DEFAULT_MS = 24 \* 60 \* 60 \* 1000/);
+  assert.match(source, /MODEL_PRICE_SYNC_RETRY_MS = 30 \* 1000/);
+  assert.match(source, /pricing\.modelUnpriced/);
+});
+
 test("direct Spend RPC uses the Host principal and rejects anonymous or child mutations", async () => {
   const admin = { source: "dsh-passwords", id: "9", username: "owner", role: "admin" };
   const calls = [];
@@ -211,6 +302,10 @@ test("direct Spend RPC uses the Host principal and rejects anonymous or child mu
     queryForPrincipal: async (request, principal) => {
       calls.push(["query", request, principal]);
       return { principalId: principal.id };
+    },
+    catalogPricingForPrincipal: async (request, principal) => {
+      calls.push(["catalogPricing", request, principal]);
+      return { models: request.models };
     },
     savePricingForPrincipal: async (request, principal) => {
       assertPricingAdministrator(principal);
@@ -232,6 +327,10 @@ test("direct Spend RPC uses the Host principal and rejects anonymous or child mu
     dispatchUsageStatsRpc(service, "query", { args: { request: {} } }, undefined),
     /authenticated principal/,
   );
+  assert.deepEqual(
+    await dispatchUsageStatsRpc(service, "catalogPricing", { args: { request: { models: [] } } }, alice),
+    { models: [] },
+  );
   await assert.rejects(
     dispatchUsageStatsRpc(service, "savePricing", { args: { request: {} } }, alice),
     /administrator permission/,
@@ -239,6 +338,7 @@ test("direct Spend RPC uses the Host principal and rejects anonymous or child mu
   await dispatchUsageStatsRpc(service, "deletePricing", { args: { request: { provider: "p", model: "m" } } }, admin);
   assert.deepEqual(calls.map(([method, , principal]) => [method, principal.id]), [
     ["query", alice.id],
+    ["catalogPricing", alice.id],
     ["deletePricing", admin.id],
   ]);
 });

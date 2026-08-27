@@ -21,6 +21,8 @@
 
 数据按 `refreshSeconds`（默认 30 秒）定时自动刷新（间隔由服务端配置下发，页面无需改动），面板内也可手动刷新。
 
+模型选择菜单会在每个模型名称下显示当前币种的输入、缓存读、缓存写和输出单价（每百万 Token）。页面启动时立即同步当前可见模型目录与 Spend 价表，管理员修改内部价格后立即刷新；此后每 24 小时再次同步。没有精确或通用模型价格的路由明确显示“未计价”，不会把仪表盘的默认估价冒充为个人扣费价格。
+
 ## 按用户计费账本与访问控制
 
 插件同时维护一个独立 SQLite 消费账本。只接收带认证 principal 的最终 `assistant/message` usage，以 `(sessionId, turn, step)` 为唯一键；实时事件、日志重放和进程重启不会重复扣费。共享 Session 中每个 turn/step 使用其耐久事件上的消息身份，用户 A 与用户 B 不会串账。
@@ -34,6 +36,8 @@
 管理员可在 Spend 面板“调用明细 → 计费单价”中为任意 provider/model 新增或编辑内部价格，按面板当前币种填写每百万 Token 的输入、输出、缓存读取和缓存写入价格。自定义价格持久化在同一 SQLite 账本中，优先级高于配置和内置知识库并立即用于新调用；未计价历史会自动补价，已计价历史保持原价格版本。子账号只能查看费率，不能新增、修改或删除。
 
 `usageStats/query` 从宿主已认证 `/api` 连接取得身份，忽略浏览器声称的身份。普通用户的面板与 CSV/JSON/调用明细导出只包含自己的调用，且不返回或渲染订阅计划、档位、固定月费与计划用量；其预计金额只按本人 Token 用量计算。管理员默认查看全部，也可在面板选择“仅管理员”或指定子账号，服务端再按 `principalId` 隔离统计。匿名调用被拒绝。直接注册的 RPC 路由不依赖 Typert 自动发现，因此本地 `link:` 安装与发布包行为一致。内部 `spendAccounting` 服务提供自然月已用金额、额度状态和按权限报告，供 `dsh-passwords` 在每个模型步骤前同步检查。
+
+每次模型调用前的额度检查都会先把最新模型用量同步到账本；此外，`syncIntervalHours`（默认 24 小时）会执行独立的后台全量对账，即使没有人打开 Spend 面板也会补齐各模型的最新用量。后台扫描会分批让出事件循环，不会因历史会话较多阻塞 Web 服务。同步使用 `(sessionId, turn, step)` 幂等键，不会因为每日重扫而重复扣费。
 
 自然月固定按 `Asia/Shanghai` 计算。`dsh-passwords` 会向本插件注册当前账号的月额度解析器，Spend 面板和悬浮预览实时显示该账号的人民币剩余额度；额度修改不会被统计缓存冻结。`monthlyBudget` 仅是部署总预算的展示值，不参与个人额度门控；订阅固定月费也不分摊到个人账本。
 
@@ -76,7 +80,7 @@
 | OpenCode Zen（`opencode-zen`） | PAYG 网关价（Claude/GPT/Gemini/Grok/DeepSeek） |
 | DeepSeek（`deepseek`） | v4-flash、v4-pro |
 
-- 日志中出现的提供商**自动匹配**知识库生成计划与价格（UI 标记"自动识别"）；显式 `plans` / `pricing` 配置始终覆盖自动识别。
+- 日志中出现的提供商**自动匹配**知识库生成计划与价格（UI 标记"自动识别"）；模型选择菜单还会按当前可见目录查询全部模型的精确价格，显式 `plans` / `pricing` 配置始终覆盖自动识别。
 - **费用口径**：Code 计划按**订阅费**、Token 计划按**估算用量**计入「预计花费（月）」；"按 token 估算"仍单独展示，用于对比。
 - 官方未公布额度的计划（如 Claude Code）显示**档位表**而非进度条；额度按官方周期（天/周/月）计量。
 
@@ -84,6 +88,7 @@
 
 - 服务端插件（`lib/index.js`）在宿主的已认证 `/api` 连接上注册 `usageStats/*` RPC，并使用连接传入的已验证身份。
 - 浏览器端（`lib/client.js`）以 `ctx.connection.rpc.call("/api", "usageStats/query", ...)` 调用同一连接，无需生成 Typert 描述符。
+- 浏览器端同时读取宿主 `llm.models` 目录，并通过 `usageStats/catalogPricing` 取得对应价表；模型菜单 DOM 出现后由观察器补入价格行，插件卸载时清理。
 - 悬浮窗口通过插件自己的 React root 挂在 `document.body` 上（`position: fixed; right: 20px; bottom: 20px`），卸载时自动移除。
 - 直接回放 `$DSH_HOME/sessions` 下所有会话的持久化日志（zstd 分帧逐帧解码），按 token-meter 的语义聚合：`assistant/chunk` 的 usage 为早期样本，`assistant/message` 的 usage 为同一 (turn, step) 的最终样本并**替换**早期样本，因此不会重复计数；当前内存中的活动会话事件也会合并进来。
 - 费用 = Σ(各桶 token × 对应单价 / 1e6)，单价解析**按提供商自动匹配**：先找 (provider, model) 精确行，再找通用 model 行，最后回退默认单价——因此每个 AI 提供商（如 opencode-go 与 openai-codex）都按其官方价目各自计费，互不干扰。
@@ -132,6 +137,7 @@ config:
   maxRecentCalls: 50       # 最近调用最多展示行数
   seriesHours: 168         # 时间曲线窗口（小时，服务端按此出 0 填充连续序列；UI 可切换 24h/72h/7d）
   refreshSeconds: 30       # 悬浮窗自动刷新间隔（秒，>= 5）
+  syncIntervalHours: 24    # 后台模型用量对账与模型价表同步间隔（小时，>= 1）
   ledgerPath: /var/lib/dsh/spend-ledger.sqlite
   usdCnyRate: 7.2          # 仪表盘与个人账本共用的固定 USD/CNY 汇率
   priceVersion: 2026-08-22
