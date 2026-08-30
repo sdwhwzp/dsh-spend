@@ -6,20 +6,35 @@
 
 简体中文 | [English](README.en.md)
 
-在 dsh Web UI 右下角显示一个**悬浮用量窗口**，查看 **token 调用量、多维度统计与预计计费金额**。
+在 dsh Web UI 右下角显示一个**悬浮用量窗口**：实时查看 token 调用量、多维度统计与预计计费金额，**零配置**自动识别计费计划并直读订阅商真实额度/余额。
 
-交互方式：
+## 目录
 
-- **悬浮胶囊**（右下角）：始终显示预计费用与总 Token；
-- **hover**：浮现摘要预览（费用、Token、输入 / 输出 / 缓存读、调用次数、**今日小计**）；
-- **点击**：展开详情面板，四个标签页；面板顶部有**工作区筛选**下拉（按项目限定全部统计口径，支持逐级下钻子目录）：
+- [功能特性](#功能特性)
+- [界面预览](#界面预览)
+- [交互方式](#交互方式)
+- [供应商自动识别（零配置）](#供应商自动识别零配置)
+- [工作原理](#工作原理)
+- [安装](#安装)
+- [配置](#配置)
+- [价格来源与计费口径](#价格来源与计费口径)
+- [目录结构](#目录结构)
+- [说明与边界](#说明与边界)
 
-  - **总览**（仪表盘，参考主流用量面板的 KPI + 趋势布局）：**统计栏**（子账号的**我的剩余额度**、预计花费（月）+ 构成、**当月预计**（本月按量外推）、按 token 估算、总 Token、调用、会话、**平均 / 次**、**缓存命中率**、**月预算**（可选部署总预算，超 80% 胶囊变黄、超 100% 变红）、**活跃天数 / 连续使用**）+ **计划用量**（自动识别 Code/Token 计划、档位、额度使用与剩余）+ **时间曲线**（默认近 24 小时，可切换 **24h / 72h / 7d**；横轴从范围内**首个有调用的小时**起算避免空白，跨天处自动标注日期避免重复小时标签）+ **活跃热力图**（近 52 周，GitHub 风格，颜色深度 = 当日 Token 量，悬停看 Token / 费用 / 调用）+ **费用 Top 提供商 / Top 模型**（各 6 行）+ 近 31 天趋势；
-  - **今日**：当天的调用数、Token 与费用小结 + **今日逐小时**的 Token / 费用图表（横轴从当天**首个有调用的小时**起算，避免凌晨空白；当天无调用时窗口收敛到当前小时）；
-  - **性能**：每个模型的**首字延时（TTFT）均值 / P50 / P90、生成速度（tokens/s）、总延迟均值**，以及按小时的 TTFT / 速度曲线（同样支持 **24h / 72h / 7d** 范围切换，并同样从首个有样本的小时起算）；
-  - **调用明细**：**每个会话 × 模型**的调用次数、token 与费用明细 + **按工作目录统计**（各项目会话数 / 模型数 / 调用 / 费用）+ **按会话统计** + **最近调用**（**费用远超均值的异常调用标红点**）+ **计费单价表**，可在**独立窗口**中打开（随主窗口自动刷新，支持 **CSV / JSON / 调用明细 CSV 导出**）。
+---
 
-数据按 `refreshSeconds`（默认 30 秒）定时自动刷新（间隔由服务端配置下发，页面无需改动），面板内也可手动刷新。
+## 功能特性
+
+- 🖱️ **三级交互**：悬浮胶囊常驻 → hover 摘要预览 → 点击展开四标签页详情面板
+- 📊 **多维统计**：按提供商 / 模型 / 小时 / 天 / 会话 / 工作目录 / 最近调用，含性能指标（TTFT、生成速度）
+- 📈 **时间序列图表**：今日逐小时、24h/72h/7d 时间曲线、52 周活跃热力图
+- 🏷️ **计费计划自动识别**：内置知识库（17 供应商 / 131 模型价格），自动区分订阅制（Code）与按量（Token）
+- 🔴 **实时额度 / 余额直读**：9 家订阅商内置适配器（额度 7 + 余额 2），展示厂商接口返回的真实值，失败安全回退不崩溃
+- ⚡ **DeepSeek 峰谷计价**：8/17 起按调用时刻自动按高峰/空闲价计费
+- 💱 **$ / ¥ 货币切换**：实时汇率（失败回退 `usdCnyRate`，默认 7.2）
+- 📂 **工作区筛选**：按项目限定全部统计口径，支持逐级下钻子目录
+- 📤 **数据导出**：调用明细支持 CSV / JSON / 调用明细 CSV 导出，可在独立窗口查看
+- 🔁 **自动刷新**：默认 30s（服务端下发，页面无需改动），面板内也可手动刷新
 
 模型选择菜单会在每个模型名称下显示当前币种的输入、缓存读、缓存写和输出单价（每百万 Token）。页面启动时立即同步当前可见模型目录与 Spend 价表，管理员修改内部价格后立即刷新；此后每 24 小时再次同步。没有精确或通用模型价格的路由明确显示“未计价”，不会把仪表盘的默认估价冒充为个人扣费价格。
 
@@ -35,13 +50,13 @@
 
 管理员可在 Spend 面板“调用明细 → 计费单价”中为任意 provider/model 新增或编辑内部价格，按面板当前币种填写每百万 Token 的输入、输出、缓存读取和缓存写入价格。自定义价格持久化在同一 SQLite 账本中，优先级高于配置和内置知识库并立即用于新调用；未计价历史会自动补价，已计价历史保持原价格版本。子账号只能查看费率，不能新增、修改或删除。
 
-`usageStats/query` 从宿主已认证 `/api` 连接取得身份，忽略浏览器声称的身份。普通用户的面板与 CSV/JSON/调用明细导出只包含自己的调用，且不返回或渲染订阅计划、档位、固定月费与计划用量；其预计金额只按本人 Token 用量计算。管理员默认查看全部，也可在面板选择“仅管理员”或指定子账号，服务端再按 `principalId` 隔离统计。匿名调用被拒绝。直接注册的 RPC 路由不依赖 Typert 自动发现，因此本地 `link:` 安装与发布包行为一致。内部 `spendAccounting` 服务提供自然月已用金额、额度状态和按权限报告，供 `dsh-passwords` 在每个模型步骤前同步检查。
+`usageStats/query` 从 Typert Gateway 取得传输层已认证 principal，忽略浏览器声称的身份。普通用户的面板与 CSV/JSON/调用明细导出只包含自己的调用，且不返回或渲染订阅计划、档位、固定月费与计划用量；其预计金额只按本人 Token 用量计算。管理员默认查看全部，也可在面板选择“仅管理员”或指定子账号，服务端再按 `principalId` 隔离统计。匿名调用被拒绝。源码模式 Remote 标记无需生成描述文件，本地 `link:` 安装与发布包行为一致。内部 `spendAccounting` 服务提供自然月已用金额、额度状态和按权限报告，供 `dsh-passwords` 在每个模型步骤前同步检查。
 
 每次模型调用前的额度检查都会先把最新模型用量同步到账本；此外，`syncIntervalHours`（默认 24 小时）会执行独立的后台全量对账，即使没有人打开 Spend 面板也会补齐各模型的最新用量。后台扫描会分批让出事件循环，不会因历史会话较多阻塞 Web 服务。同步使用 `(sessionId, turn, step)` 幂等键，不会因为每日重扫而重复扣费。
 
 自然月固定按 `Asia/Shanghai` 计算。`dsh-passwords` 会向本插件注册当前账号的月额度解析器，Spend 面板和悬浮预览实时显示该账号的人民币剩余额度；额度修改不会被统计缓存冻结。`monthlyBudget` 仅是部署总预算的展示值，不参与个人额度门控；订阅固定月费也不分摊到个人账本。
 
-仪表盘默认使用人民币。价表始终按 USD/百万 Token 配置，服务端先用 `usdCnyRate` 换算单价、费用、自动识别的订阅费和金额额度，再向页面返回 CNY，避免仅替换货币符号造成金额错误。
+仪表盘默认使用人民币，宿主统一以 USD 计算基础快照。价表始终按 USD/百万 Token 配置，浏览器再按实时或固定 `usdCnyRate` 换算单价、费用、自动识别的订阅费和金额额度，避免仅替换货币符号造成金额错误。
 
 ## 界面预览
 
@@ -49,21 +64,42 @@
 
 ![调用明细窗口](docs/screenshots/details-window.png)
 
-## 供应商自动识别（无需配置）
+## 交互方式
 
-插件内置**供应商知识库**（`lib/knowledge.js`，2026-08-27 官方文档核实）：**17 个供应商 / 159 个模型价格**，provider id 自动归一化别名（`zai` / `z-ai` / `glm`→zhipu、`kimi`→moonshot、`dashscope`→qwen、`gemini`→google、`grok`→xai、`claude`→anthropic、`copilot`→github-copilot 等）。
+| 层级 | 内容 |
+|---|---|
+| **悬浮胶囊**（右下角） | 始终显示预计费用与总 Token（超预算变黄/变红告警） |
+| **hover** | 摘要预览：费用、Token、输入 / 输出 / 缓存读、调用次数、**今日小计** |
+| **点击展开** | 四标签页详情面板；顶部**工作区筛选**下拉（按项目限定统计、逐级下钻子目录），标签栏右侧 **$ / ¥ 货币切换**按钮（悬停预览同款；汇率由服务端实时拉取，失败回退 `usdCnyRate` 固定值） |
 
-**订阅制（Code 计划）— 自动识别档位费与额度：**
+### 四个标签页
+
+- **总览**（纯 KPI + 排名摘要，无图表）：
+  - **统计栏**：预计花费（月）+ 构成、**当月预计**（本月按量外推）、按 token 估算、总 Token、调用、会话、**平均 / 次**、**缓存命中率**、**月预算**（可选配置，超 80% 胶囊变黄、超 100% 变红）、**活跃天数 / 连续使用**；
+  - **计划用量**：自动识别 Code/Token 计划、档位、额度使用与剩余；
+  - **费用 Top 提供商 / Top 模型**（各 6 行）+ 近 31 天趋势。
+- **今日**：当天调用数、Token 与费用小结 + **今日逐小时** Token / 费用图（横轴从当天**首个有调用的小时**起算，避免凌晨空白；当天无调用时窗口收敛到当前小时）+ **时间曲线**（默认近 24 小时，可切换 **24h / 72h / 7d**，首个有调用的小时起算，跨天处自动标注日期）+ **活跃热力图**（近 52 周，GitHub 风格，颜色深度 = 当日 Token 量，悬停看 Token / 费用 / 调用）。
+- **性能**：每模型的**首字延时（TTFT）均值 / P50 / P90、生成速度（tokens/s）、总延迟均值** + 按小时的 TTFT / 速度曲线（支持 **24h / 72h / 7d** 切换，首个有样本的小时起算）。
+- **调用明细**：**每会话 × 模型**的调用次数、token 与费用明细 + **按工作目录统计**（各项目会话数 / 模型数 / 调用 / 费用）+ **按会话统计** + **最近调用**（**费用远超均值的异常调用标红点**）+ **计费单价表**。可在**独立窗口**打开（随主窗口自动刷新，支持 **CSV / JSON / 调用明细 CSV 导出**）。
+
+## 供应商自动识别（零配置）
+
+插件内置**供应商知识库**（`lib/knowledge.js`，2026-08-27 官方文档核实）：**17 个供应商 / 159 个模型价格**。provider id 自动归一化别名：`glm`→zhipu、`kimi`→moonshot、`dashscope`→qwen、`gemini`→google、`grok`→xai、`claude`→anthropic、`copilot`→github-copilot、`minimax-cn`→minimax、`deepseek-official`→deepseek 等。日志中出现的提供商**自动匹配**知识库生成计划与价格（UI 标记"自动识别"）；显式 `plans` / `pricing` 配置始终覆盖自动识别。
+
+### 订阅制（Code 计划）— 自动识别档位费与额度
 
 | 供应商 | 默认档 | 档位 | 额度口径 |
 |---|---|---|---|
-| OpenCode Go（`opencode-go`） | $10/月 | — | 周 $30（V4 Flash 约 79,050 请求/周） |
-| OpenAI Codex（`openai-codex`） | Plus $20/月 | Plus / Pro 5x $100 / Pro 20x $200 / Business | ~100 请求/周（参考） |
-| GitHub Copilot（`github-copilot`） | Pro $10/月 | Free / Pro / Pro+ $39 / Max $100 / Business / Enterprise | AI Credits 月 $15（Pro） |
-| Claude Code（`claude-sub`） | Pro $20/月 | Pro / Max 5x $100 / Max 20x $200 | 官方未公布请求数（5h 窗口 1x/5x/20x） |
-| Google AI / Gemini CLI（`google-ai-sub`） | AI Pro $19.99/月 | AI Pro / Ultra 5x $99.99 / Ultra 20x $199.99 | 1,500 请求/天（Pro） |
+| OpenCode Go（`opencode-go`） | $10/月 | — | **实时额度**（官方 `GET /zen/go/v1/usage`：5h/周/月 实际已用百分比 + 重置时间）；接口不可用时回退周 $30（V4 Flash 约 79,050 请求/周） |
+| OpenAI Codex（`openai-codex`） | Plus $20/月 | Plus / Pro 5x $100 / Pro 20x $200 / Business | **实时额度**（`chatgpt.com/backend-api/wham/usage`，需本机 `~/.codex/auth.json` 登录态；未登录回退 ~100 请求/周） |
+| GitHub Copilot（`github-copilot`） | Pro $10/月 | Free / Pro / Pro+ $39 / Max $100 / Business / Enterprise | **实时额度**（`api.github.com/copilot_internal/user`，需 `GH_TOKEN`/`GITHUB_TOKEN` 或 `gh auth login`；未登录回退 AI Credits 月 $15） |
+| Claude Code（`claude-sub`） | Pro $20/月 | Pro / Max 5x $100 / Max 20x $200 | **实时额度**（`api.anthropic.com/api/oauth/usage`，需本机 `~/.claude/.credentials.json` 登录态；未登录回退档位表 5h 1x/5x/20x） |
+| 智谱 Coding Plan（`zhipu`） | 官方套餐 | — | **实时额度**（官方 `bigmodel.cn/api/monitor/usage/quota/limit`：5h/周 已用百分比 + 重置时间、MCP 月度次数；凭据缝 `ZHIPU_API_KEY`；国际站 z.ai 可用 `usageEndpoints` 换 URL） |
+| MiniMax Token Plan（`minimax`） | 官方套餐 | — | **实时额度**（官方 `minimaxi.com/v1/token_plan/remains`：5h/周 剩余百分比 + 重置时间；凭据缝 `MINIMAX_API_KEY`，兜底 `MINIMAX_CN_API_KEY`；国际站 minimax.io 可用 `usageEndpoints` 换 URL） |
+| ClinePass（`clinepass`） | 官方套餐 | — | **实时额度**（官方 `api.cline.bot/v1/users/me/plan/usage-limits`：300 分钟/周/月 已用百分比 + 重置时间；凭据缝 `CLINEPASS_API_KEY`） |
+| Google AI / Gemini CLI（`google-ai-sub`） | AI Pro $19.99/月 | AI Pro / Ultra 5x $99.99 / Ultra 20x $199.99 | 无公开用量接口，按官方每日上限（1,500 / 2,000 请求/天）展示 |
 
-**按量计费（Token 计划）— 自动带官方价：**
+### 按量计费（Token 计划）— 自动带官方价
 
 | 供应商 | 已收录模型 |
 |---|---|
@@ -82,21 +118,36 @@
 
 GLM-5.3-Flash 按官方 5 折活动价计费至 2026-09-09 24:00（UTC+8），之后自动切换为原价；历史调用始终按各自发生时间对应的价格计算。
 
-- 日志中出现的提供商**自动匹配**知识库生成计划与价格（UI 标记"自动识别"）；模型选择菜单还会按当前可见目录查询全部模型的精确价格，显式 `plans` / `pricing` 配置始终覆盖自动识别。
-- **费用口径**：Code 计划按**订阅费**、Token 计划按**估算用量**计入「预计花费（月）」；"按 token 估算"仍单独展示，用于对比。
-- 官方未公布额度的计划（如 Claude Code）显示**档位表**而非进度条；额度按官方周期（天/周/月）计量。
+### 实时额度 / 余额（厂商直读）
+
+内置适配器（`lib/providers/`，端点与鉴权 2026-08-25 核实）：
+
+- **额度类**（订阅制 Code 计划）：OpenCode Go / OpenAI Codex / Claude Code / GitHub Copilot / 智谱 Coding Plan / MiniMax Token Plan / ClinePass —— 卡片直接展示**订阅商接口返回的额度值**：每个窗口 5h/周/月的**实际已用百分比**与**重置时间**，另附供应商特有额度（Codex 代码评审、Claude Opus/Design 周窗口、Copilot Premium/Chat 快照、智谱 MCP 月度次数）；
+- **余额类**（按量 Token 计划）：DeepSeek / Moonshot —— 展示**真实账户余额**（钱包可用余额 + 充值/赠金拆分，随 $/¥ 切换自动换算）。
+
+凭据**只读**复用本机登录态与凭据缝：
+
+| 供应商 | 凭据来源 |
+|---|---|
+| OpenCode Go / DeepSeek / 智谱 / MiniMax / ClinePass / Moonshot | 环境变量或凭据缝：`OPENCODE_GO_API_KEY` / `DEEPSEEK_API_KEY` / `ZHIPU_API_KEY` / `MINIMAX_API_KEY`（兜底 `MINIMAX_CN_API_KEY`） / `CLINEPASS_API_KEY` / `MOONSHOT_API_KEY` |
+| OpenAI Codex | 本机 `~/.codex/auth.json` 登录态 |
+| Claude Code | 本机 `~/.claude/.credentials.json` 登录态 |
+| GitHub Copilot | `GH_TOKEN` / `GITHUB_TOKEN` / `gh` 配置 |
+
+**余额卡自动出现**：只要凭据缝（`$DSH_HOME/.credentials.yaml`）配置了 `DEEPSEEK_API_KEY` / `MOONSHOT_API_KEY`，即使该 provider 未出现在会话日志中（例如经 OpenCode Go 网关使用），也会自动生成 token 计划卡展示真实账户余额。登录态缺失或接口失败时卡片显示原因并回退本地配额行。Codex/Claude/Copilot 为非公开/逆向接口（`chatgpt.com`、`api.anthropic.com`、`api.github.com`），随时可能变化，**失败不崩溃**。
+
+**费用口径**：Code 计划按**订阅费**、Token 计划按**估算用量**计入「预计花费（月）」；"按 token 估算"仍单独展示用于对比。官方未公布额度的计划（如 Claude Code）显示**档位表**而非进度条；额度按官方周期（天/周/月）计量。
 
 ## 工作原理
 
-- 服务端插件（`lib/index.js`）在宿主的已认证 `/api` 连接上注册 `usageStats/*` RPC，并使用连接传入的已验证身份。
-- 浏览器端（`lib/client.js`）以 `ctx.connection.rpc.call("/api", "usageStats/query", ...)` 调用同一连接，无需生成 Typert 描述符。
-- 浏览器端同时读取宿主 `llm.models` 目录，并通过 `usageStats/catalogPricing` 取得对应价表；模型菜单 DOM 出现后由观察器补入价格行，插件卸载时清理。
-- 悬浮窗口通过插件自己的 React root 挂在 `document.body` 上（`position: fixed; right: 20px; bottom: 20px`），卸载时自动移除。
-- 直接回放 `$DSH_HOME/sessions` 下所有会话的持久化日志（zstd 分帧逐帧解码），按 token-meter 的语义聚合：`assistant/chunk` 的 usage 为早期样本，`assistant/message` 的 usage 为同一 (turn, step) 的最终样本并**替换**早期样本，因此不会重复计数；当前内存中的活动会话事件也会合并进来。
-- 费用 = Σ(各桶 token × 对应单价 / 1e6)，单价解析**按提供商自动匹配**：先找 (provider, model) 精确行，再找通用 model 行，最后回退默认单价——因此每个 AI 提供商（如 opencode-go 与 openai-codex）都按其官方价目各自计费，互不干扰。
-- 统计维度：总账 / 按提供商 / 按模型 / 按小时（0 填充的连续时间序列，用于曲线图）/ 按天 / 按会话 / 最近调用 / 性能（每步首字延时 TTFT、生成速度 tokens/s、总延迟，按模型与按小时聚合）/ 会话 × 模型明细。
-- 性能口径：TTFT = 请求（`request/header`）→ 首个内容 chunk；生成时长 = 首 → 末内容 chunk；tokens/s = 输出 token ÷ 生成时长。工具调用后的续写步骤没有独立请求日志，其 TTFT 以 `step/start` 为起点**估算**（样本带 `ttftEstimated` 标记）。
-- 快照按「会话文件大小 + mtime + 活动会话事件数」做签名缓存，数据未变时直接返回缓存。
+- **服务端**（`lib/index.js`）注册为 Typert Remote 服务 `usageStats`（通过网关的 SRC 发现机制，无需生成描述符文件）。
+- **浏览器端**（`lib/client.js`）先挂载自身的严格 `usageStats` 贡献，再通过 `ctx.remote.usageStats` 调用认证后的 Remote 命名空间，并通过 `ctx.remote.session.modelCatalog()` 同步模型目录价格。
+- **悬浮窗口**通过插件自己的 React root 挂在 `document.body` 上（`position: fixed; right: 20px; bottom: 20px`），卸载时自动移除。
+- **数据回放**：直接回放 `$DSH_HOME/sessions` 下所有会话的持久化日志（zstd 分帧逐帧解码），按 token-meter 语义聚合：`assistant/chunk` 的 usage 为早期样本，`assistant/message` 的 usage 为同一 (turn, step) 的**最终样本并替换**早期样本，因此不会重复计数；当前内存中的活动会话事件也会合并进来。
+- **计费**：费用 = Σ(各桶 token × 对应单价 / 1e6)，单价解析**按提供商自动匹配**：先找 (provider, model) 精确行，再找通用 model 行，最后回退默认单价——每个 AI 提供商（如 opencode-go 与 openai-codex）都按其官方价目各自计费，互不干扰。
+- **统计维度**：总账 / 按提供商 / 按模型 / 按小时（0 填充的连续时间序列，用于曲线图）/ 按天 / 按会话 / 最近调用 / 性能（每步首字延时 TTFT、生成速度 tokens/s、总延迟，按模型与按小时聚合）/ 会话 × 模型明细。
+- **性能口径**：TTFT = 请求（`request/header`）→ 首个内容 chunk；生成时长 = 首 → 末内容 chunk；tokens/s = 输出 token ÷ 生成时长。工具调用后的续写步骤没有独立请求日志，其 TTFT 以 `step/start` 为起点**估算**（样本带 `ttftEstimated` 标记）。
+- **快照缓存**：按「会话文件大小 + mtime + 活动会话事件数」做签名缓存，数据未变时直接返回缓存。
 
 ## 安装
 
@@ -115,16 +166,21 @@ dsh web
 
 也可以从源码安装：`dsh plugin --profile web add github:sdwhwzp/dsh-spend`（或本地路径 `-w /path/to/dsh-spend`）。
 
-**覆盖默认配置**：插件内置供应商知识库自动识别价格与计费计划（见上方），一般无需配置。需要覆盖时，在 `~/.dsh/profiles/web/cordis.patch.yml` 中加入同 id（`usage-stats`）的 insert 行即可——用户层在 bundle 层之后应用，同名行覆盖生效（配置项见下方「配置」章节）。
+**覆盖默认配置**：插件内置供应商知识库自动识别价格与计费计划（见上），一般无需配置。需要覆盖时，在 `~/.dsh/profiles/web/cordis.patch.yml` 中加入同 id（`usage-stats`）的 insert 行即可——用户层在 bundle 层之后应用，同名行覆盖生效。配置项见下节。
 
 ## 配置
 
-`cordis.patch.yml` 中 `usage-stats` 行的 `config`（当前已写入官方价，见下方「价格来源」）：
+`cordis.patch.yml` 中 `usage-stats` 行的 `config`（当前已写入官方价，见「价格来源」）：
 
 ```yaml
 config:
-  currency: CNY            # 默认人民币展示；也可设为 USD
-  pricing:                 # USD/百万 token，页面按 usdCnyRate 换算
+  currency: USD            # 服务端基准货币（费用按 USD 计算；UI 内可自由切换 $ / ¥ 展示）
+  usdCnyRate: 7.2          # USD→CNY 固定汇率（实时汇率拉取失败时的回退值）
+  liveRate: true           # 服务端实时拉取 USD→CNY 汇率（6h 缓存）；false 时始终用固定值
+  syncIntervalHours: 24    # 后台账本对账与模型价格同步周期
+  priceVersion: 2026-08-27 # 写入个人账本的价格版本
+  fxVersion: fixed-2026-08-21 # 写入个人账本的汇率版本
+  pricing:                 # 按模型精确匹配的单价（每百万 token）
     - model: deepseek-v4-flash
       inputPerMillion: 0.14
       outputPerMillion: 0.28
@@ -139,11 +195,7 @@ config:
   maxRecentCalls: 50       # 最近调用最多展示行数
   seriesHours: 168         # 时间曲线窗口（小时，服务端按此出 0 填充连续序列；UI 可切换 24h/72h/7d）
   refreshSeconds: 30       # 悬浮窗自动刷新间隔（秒，>= 5）
-  syncIntervalHours: 24    # 后台模型用量对账与模型价表同步间隔（小时，>= 1）
   ledgerPath: /var/lib/dsh/spend-ledger.sqlite
-  usdCnyRate: 7.2          # 仪表盘与个人账本共用的固定 USD/CNY 汇率
-  priceVersion: 2026-08-27
-  fxVersion: fixed-2026-08-21
   monthlyBudget: 50        # 可选部署总预算展示，不参与个人额度判断
   plans:                   # 计费计划：判断 Token Plan / Code Plan 并展示使用量与剩余量
     - provider: opencode-go
@@ -153,16 +205,20 @@ config:
       type: code           # 订阅额度制：使用量取近 periodDays 天的实际消耗
       quotaRequests: 100   # 周期请求额度（也可用 quotaTokens 按 token 额度）
       periodDays: 7
+  usageEndpoints:          # 订阅商实时额度接口（内置 opencode-go 默认值；其余内置适配器见注释）
+    - provider: opencode-go
+      url: https://opencode.ai/zen/go/v1/usage   # 官方额度端点（非公开文档 API）
+      apiKeyEnv: OPENCODE_GO_API_KEY             # 可选：凭据名（默认 <PROVIDER>_API_KEY）
+      timeoutMs: 15000                           # 可选：超时毫秒
 ```
 
-> 计价行可加可选 `provider` 字段做提供商精确匹配（如 `provider: openai-codex`），
-> 不带 provider 的行对任意提供商的同名模型生效；未匹配到任何行时回退 `defaultPricing`。
-> Token Plan 的「剩余」= 配置的充值余额 − 累计已用费用；Code Plan 的「剩余」= 额度 − 周期内实际消耗。
-> 未配置 `plans` 的提供商不显示计划卡片（默认按 token 计费口径展示费用）。
+> **实时额度/余额**：Code 计划按内置适配器（`lib/providers/`）直读订阅商接口——opencode-go（凭据缝 `OPENCODE_GO_API_KEY`）、openai-codex（本机 `~/.codex/auth.json`）、claude-sub（`~/.claude/.credentials.json`）、github-copilot（`GH_TOKEN`/`GITHUB_TOKEN`/`gh` 配置）、zhipu（`ZHIPU_API_KEY`）、minimax（`MINIMAX_API_KEY`，兜底 `MINIMAX_CN_API_KEY`）、clinepass（`CLINEPASS_API_KEY`）；卡片显示各窗口实际百分比与重置时间。Token 计划余额直读：deepseek（`DEEPSEEK_API_KEY`）、moonshot（`MOONSHOT_API_KEY`）。`usageEndpoints` 可覆盖内置地址/超时，或为自定义供应商走通用 Bearer-key 通道（`<PROVIDER>_API_KEY`）。仅当登录态缺失、超时或非 200 时回退本地配额行并提示原因。
 
-### 价格来源（2026-08-27 官网查证）
+> **计价行**可加可选 `provider` 字段做提供商精确匹配（如 `provider: openai-codex`），不带 provider 的行对任意提供商的同名模型生效；未匹配到任何行时回退 `defaultPricing`。Token Plan 的「剩余」= 配置的充值余额 − 累计已用费用；Code Plan 的「剩余」= 额度 − 周期内实际消耗。未配置 `plans` 的提供商不显示计划卡片（默认按 token 计费口径展示费用）。
 
-单价均来自厂商官方定价页，已写入本地配置；`费用 = Σ(各桶 token × 对应单价 / 1e6)`。**下表为 2026-08-17 前的 legacy 价**；8/17 起 DeepSeek 自动按峰谷价计价（见下方 ⚡ 说明，provider 为 `deepseek` 或 `deepseek-official` 时均生效）：
+## 价格来源与计费口径
+
+> 单价均来自厂商官方定价页（2026-08-14 查证），已写入本地配置；费用 = Σ(各桶 token × 对应单价 / 1e6)。**下表为 2026-08-17 前的 legacy 价**；8/17 起 DeepSeek 自动按峰谷价计价（见下方 ⚡ 说明，provider 为 `deepseek` 或 `deepseek-official` 时均生效）：
 
 | 模型 | 输入(未命中) | 输入(缓存命中) | 缓存写 | 输出 |
 |---|---|---|---|---|
@@ -186,19 +242,40 @@ config:
 
 ```
 dsh-spend/
-├── package.json        # 双端声明：dsh.client（web 平台 + 注入边）
+├── package.json          # 双端声明：dsh.client（web 平台 + 注入边）、dsh.bundle 清单
+├── cordis.patch.yml      # bundle 补丁：向 profile 插入 usage-stats 配置行
 ├── lib/
-│   ├── index.js        # 服务端插件：UsageStatsService + 已认证 RPC
-│   ├── knowledge.js    # 供应商知识库：计划自动识别（Code/Token）
-│   ├── ledger.js       # SQLite 个人消费账本、管理员价格覆盖与额度服务
-│   ├── stats.js        # 纯回放/聚合/计费逻辑（可独立测试）
-│   └── client.js       # 浏览器 bundle（手写 __ModuleLoader__ 格式）
-└── node_modules/       # 指向 dsh 安装的依赖符号链接（本地开发，不入库）
+│   ├── index.js          # 服务端插件：UsageStatsService（Typert Remote）
+│   ├── knowledge.js      # 供应商知识库：计划自动识别（Code/Token）
+│   ├── ledger.js         # SQLite 个人消费账本、管理员价格覆盖与额度服务
+│   ├── stats.js          # 纯回放/聚合/计费逻辑（可独立测试）
+│   ├── providers.js      # 实时额度/余额适配器门面（历史导入面兼容）
+│   ├── providers/        # 适配器实现（每厂商一个文件，共享 common.js）
+│   │   ├── index.js      # 注册表：PROVIDER_USAGE（额度）/ PROVIDER_BALANCE（余额）
+│   │   ├── common.js     # 共享工具（请求、鉴权、归一化）
+│   │   ├── opencode.js           # OpenCode Go 实时额度（官方端点）
+│   │   ├── oauth-codex.js        # OpenAI Codex 实时额度（逆向接口）
+│   │   ├── oauth-claude.js       # Claude Code 实时额度（逆向接口）
+│   │   ├── oauth-copilot.js      # GitHub Copilot 实时额度（逆向接口）
+│   │   ├── quota-zhipu.js        # 智谱 Coding Plan 实时额度（官方端点）
+│   │   ├── quota-minimax.js      # MiniMax Token Plan 实时额度（官方端点）
+│   │   ├── quota-clinepass.js    # ClinePass 实时额度（官方端点）
+│   │   ├── balance-deepseek.js   # DeepSeek 账户余额（官方端点）
+│   │   └── balance-moonshot.js   # Moonshot 账户余额（官方端点）
+│   └── client.js         # 浏览器 bundle（手写 __ModuleLoader__ 格式）
+├── docs/screenshots/     # 界面截图
+├── README.md             # 本文件（中文）
+├── README.en.md          # 英文版
+└── LICENSE               # MIT
 ```
 
 ## 说明与边界
 
-- 统计口径与 harness 的 token-meter 投影一致：**仅统计带 provider usage 的调用**；
-  reasoning 计入 output 桶的细分（如日志提供 `reasoningTokens`）。
+- 统计口径与 harness 的 token-meter 投影一致：**仅统计带 provider usage 的调用**；reasoning 计入 output 桶的细分（如日志提供 `reasoningTokens`）。
 - 计费为估算值，不是账单；缓存读按命中单价计费。
 - 日志解码失败的会话会计入 `decodeErrors` 并在页脚提示。
+- Codex/Claude/Copilot 额度接口为非公开/逆向接口，可能随时失效；适配器已做失败降级（显示原因并回退本地配额行），不会崩溃。
+
+## License
+
+[MIT](LICENSE)

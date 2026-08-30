@@ -4,9 +4,10 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Context } from "@deepseek-ai/cordis";
+import { remoteMethods } from "@deepseek-ai/dsh-typert-protocol";
 import { SpendAccountingService, SpendLedger, priceUsageMicros, shanghaiMonth } from "../lib/ledger.js";
 import { foldSession } from "../lib/stats.js";
-import { assertPricingAdministrator, callsForPrincipal, dispatchUsageStatsRpc, normalizeCatalogModels, normalizePricingOverride, planDisclosureForPrincipal, planForDisplay, pricingForDisplay, principalOptionsFor, registerDailyReconciliation, registerUsageStatsRpc, UsageStatsService } from "../lib/index.js";
+import { assertPricingAdministrator, callsForPrincipal, normalizeCatalogModels, normalizePricingOverride, planDisclosureForPrincipal, planForDisplay, pricingForDisplay, principalOptionsFor, registerDailyReconciliation, UsageStatsService } from "../lib/index.js";
 import { autoPlanFor, autoRatesFor, normalizeProvider } from "../lib/knowledge.js";
 
 const alice = { source: "dsh-passwords", id: "1", username: "alice", role: "user" };
@@ -36,16 +37,18 @@ test("codex subscription calls use exact internal token rates", () => {
     auto: true,
     label: "OpenAI Codex",
     subscription: { amount: 20, currency: "USD", period: "month" },
+    quota: { requestsPer5h: 100, requestsPerWeek: 100 },
+    quotaNote: "5h 窗口当前暂停，按周限制执行",
     quotaRequests: 100,
     quotaTokens: null,
     dollarsPerWeek: null,
     dollarsPerMonth: null,
     periodDays: 7,
     tiers: [
-      { name: "Plus", default: true, subscription: { amount: 20, currency: "USD", period: "month" }, quotaRequests: 100, periodDays: 7 },
-      { name: "Pro 5x", default: false, subscription: { amount: 100, currency: "USD", period: "month" }, quotaRequests: 500, periodDays: 7 },
-      { name: "Pro 20x", default: false, subscription: { amount: 200, currency: "USD", period: "month" }, quotaRequests: 2000, periodDays: 7 },
-      { name: "Business", default: false, subscription: { amount: 20, currency: "USD", period: "month" }, quotaRequests: 100, periodDays: 7 },
+      { name: "Plus", default: true, subscription: { amount: 20, currency: "USD", period: "month" }, quota: { requestsPer5h: 100, requestsPerWeek: 100 }, quotaRequests: 100, periodDays: 7 },
+      { name: "Pro 5x", default: false, subscription: { amount: 100, currency: "USD", period: "month" }, quota: { requestsPer5h: 500, requestsPerWeek: 500 }, quotaRequests: 500, periodDays: 7 },
+      { name: "Pro 20x", default: false, subscription: { amount: 200, currency: "USD", period: "month" }, quota: { requestsPer5h: 2000, requestsPerWeek: 2000 }, quotaRequests: 2000, periodDays: 7 },
+      { name: "Business", default: false, subscription: { amount: 20, currency: "USD", period: "month" }, quota: { requestsPer5h: 100, requestsPerWeek: 100 }, quotaRequests: 100, periodDays: 7 },
     ],
   });
   const codexRates = autoRatesFor("codex");
@@ -335,7 +338,10 @@ test("daily reconciliation repeats every 24 hours and disposes with the plugin",
 
 test("browser client synchronizes catalog prices and decorates every model-menu row", () => {
   const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
-  assert.match(source, /ctx\.connection\.api\.llm\.models\(\{\}\)/);
+  assert.match(source, /await ctx\.remote\.\$mount\(USAGE_STATS_REMOTE\)/);
+  assert.match(source, /ctx\.remote\.session\.modelCatalog\(\)/);
+  assert.match(source, /ctx\.remote\.usageStats\[method\]\(request\)/);
+  assert.doesNotMatch(source, /ctx\.connection/);
   assert.match(source, /callUsageStats\(ctx, "catalogPricing", \{ models \}\)/);
   assert.match(source, /MutationObserver\(decorate\)/);
   assert.match(source, /data-dsh-spend-model-price/);
@@ -344,11 +350,16 @@ test("browser client synchronizes catalog prices and decorates every model-menu 
   assert.match(source, /pricing\.modelUnpriced/);
 });
 
-test("direct Spend RPC uses the Host principal and rejects anonymous or child mutations", async () => {
+test("Remote entrypoints use the Gateway principal and reject anonymous or child mutations", async () => {
   const admin = { source: "dsh-passwords", id: "9", username: "owner", role: "admin" };
   const calls = [];
+  let principal = alice;
   const service = {
+    ctx: { typertGateway: { currentPrincipal: () => principal } },
     queryForPrincipal: async (request, principal) => {
+      if (principal === undefined) {
+        return UsageStatsService.prototype.queryForPrincipal.call(service, request, principal);
+      }
       calls.push(["query", request, principal]);
       return { principalId: principal.id };
     },
@@ -369,22 +380,25 @@ test("direct Spend RPC uses the Host principal and rejects anonymous or child mu
   };
 
   assert.deepEqual(
-    await dispatchUsageStatsRpc(service, "query", { args: { request: {} } }, alice),
+    await UsageStatsService.prototype.query.call(service, {}),
     { principalId: alice.id },
   );
+  principal = undefined;
   await assert.rejects(
-    dispatchUsageStatsRpc(service, "query", { args: { request: {} } }, undefined),
+    UsageStatsService.prototype.query.call(service, {}),
     /authenticated principal/,
   );
+  principal = alice;
   assert.deepEqual(
-    await dispatchUsageStatsRpc(service, "catalogPricing", { args: { request: { models: [] } } }, alice),
+    await UsageStatsService.prototype.catalogPricing.call(service, { models: [] }),
     { models: [] },
   );
   await assert.rejects(
-    dispatchUsageStatsRpc(service, "savePricing", { args: { request: {} } }, alice),
+    UsageStatsService.prototype.savePricing.call(service, {}),
     /administrator permission/,
   );
-  await dispatchUsageStatsRpc(service, "deletePricing", { args: { request: { provider: "p", model: "m" } } }, admin);
+  principal = admin;
+  await UsageStatsService.prototype.deletePricing.call(service, { provider: "p", model: "m" });
   assert.deepEqual(calls.map(([method, , principal]) => [method, principal.id]), [
     ["query", alice.id],
     ["catalogPricing", alice.id],
@@ -392,41 +406,27 @@ test("direct Spend RPC uses the Host principal and rejects anonymous or child mu
   ]);
 });
 
-test("direct Spend RPC registers on its required Host Connection", async () => {
-  const principal = { source: "dsh-passwords", id: "9", username: "owner", role: "admin" };
-  const service = {
-    queryForPrincipal: async (request, received) => ({ request, principal: received }),
-  };
-  let registration;
-  let disposed = false;
-  let effectLabel;
-  const connection = {
-    rpc: {
-      intercept: (...args) => {
-        registration = args;
-        return () => { disposed = true; };
-      },
-    },
-  };
-  let disposer;
-  const ctx = {
-    get: (name) => name === "connection" ? connection : undefined,
-    effect: (activate, label) => {
-      effectLabel = label;
-      disposer = activate();
-    },
-  };
-
-  registerUsageStatsRpc(ctx, service);
-  assert.equal(effectLabel, "dsh-spend: /api/usageStats/* rpc endpoints");
-  assert.equal(registration[0], "/api");
-  assert.equal(registration[1]("usageStats/query"), true);
-  assert.deepEqual(
-    await registration[2]("usageStats/query", { args: { request: { cwd: "/work" } } }, undefined, principal),
-    { ok: true, value: { request: { cwd: "/work" }, principal } },
-  );
-  disposer();
-  assert.equal(disposed, true);
+test("Spend exposes all four alpha.1 source-mode Remote markers", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "dsh-spend-remote-"));
+  const ctx = new Context();
+  try {
+    const service = new UsageStatsService(ctx, {
+      ledgerPath: join(directory, "ledger.sqlite"),
+      liveRate: false,
+    });
+    assert.equal(service.typertRemote.service, service);
+    assert.equal(service.typertRemote.serviceKey, "usageStats");
+    assert.equal(service.typertRemote.namespace, "usageStats");
+    assert.deepEqual(remoteMethods(service), [
+      { method: "query", invocation: { kind: "direct" } },
+      { method: "catalogPricing", invocation: { kind: "direct" } },
+      { method: "savePricing", invocation: { kind: "direct" } },
+      { method: "deletePricing", invocation: { kind: "direct" } },
+    ]);
+  } finally {
+    await ctx.fiber.dispose();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("CNY display converts rates, schedules, subscriptions and monetary quotas", () => {
