@@ -339,6 +339,9 @@ test("daily reconciliation repeats every 24 hours and disposes with the plugin",
 test("browser client synchronizes catalog prices and decorates every model-menu row", () => {
   const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
   assert.match(source, /await ctx\.remote\.\$mount\(USAGE_STATS_REMOTE\)/);
+  assert.match(source, /ctx\.inject\(\["remote\.usageStats"\], \(scope\) =>/);
+  assert.match(source, /const query = buildQuery\(scope\)/);
+  assert.match(source, /installModelPriceLabels\(scope, t\)/);
   assert.match(source, /ctx\.remote\.session\.modelCatalog\(\)/);
   assert.match(source, /ctx\.remote\.usageStats\[method\]\(request\)/);
   assert.doesNotMatch(source, /ctx\.connection/);
