@@ -21,6 +21,10 @@ A **floating usage widget** pinned to the bottom-right corner of the dsh Web UI:
 
 ---
 
+## 0.6.3 changes
+
+- Fixes the Cordis v4 browser startup failure caused by reading `remote.usageStats` without an exact injection after mounting the Spend Remote. The plugin now mounts the contribution, injects `remote.usageStats`, passes that client to every statistics and pricing call, and disposes the mounted contribution on unload. Host-provided `remote.session` remains a static dependency and does not participate in the dynamic mount.
+
 ## Highlights
 
 - 🖱️ **Three-level interaction**: persistent floating pill → hover summary preview → click for a four-tab dashboard
@@ -139,7 +143,7 @@ Credentials are reused read-only from local CLI logins and the credentials seam:
 ## How it works
 
 - **Host plugin** (`lib/index.js`) registers a Typert Remote service `usageStats` (discovered by the gateway's SRC reflection — no generated descriptor files).
-- **Browser half** (`lib/client.js`) mounts its strict `usageStats` contribution, calls `ctx.remote.usageStats`, and reads the visible model catalog through `ctx.remote.session.modelCatalog()`.
+- **Browser half** (`lib/client.js`) mounts its strict `usageStats` contribution and obtains its client through an exact `remote.usageStats` nested-service injection; the statically injected `remote.session` supplies the visible model catalog.
 - **Model-price synchronization** asks `usageStats/catalogPricing` for matching rates at startup, after administrator changes and every 24 hours; a lifecycle-owned observer adds the price row when model menus enter the DOM and removes it on unload.
 - **The floating widget** renders through its own React root on `document.body` (`position: fixed; right: 20px; bottom: 20px`) and is removed on plugin unload.
 - **Data replay**: session logs under `$DSH_HOME/sessions` are replayed frame by frame (zstd) using the same semantics as the harness token-meter: `assistant/chunk` usage is an early sample, the `assistant/message` usage is the **final sample for the same (turn, step) and replaces it**, so nothing is double-counted; in-memory live-session events are merged on top.

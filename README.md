@@ -23,6 +23,10 @@
 
 ---
 
+## 0.6.3 变更
+
+- 修复 Cordis v4 浏览器端在挂载 Spend Remote 后未经精确注入直接读取 `remote.usageStats` 的启动错误。插件现在先挂载贡献，再注入 `remote.usageStats` 并把取得的 client 传给全部统计与价表调用，卸载时释放挂载贡献；宿主提供的 `remote.session` 继续作为静态依赖注入，不参与动态挂载。
+
 ## 功能特性
 
 - 🖱️ **三级交互**：悬浮胶囊常驻 → hover 摘要预览 → 点击展开四标签页详情面板
@@ -141,7 +145,7 @@ GLM-5.3-Flash 按官方 5 折活动价计费至 2026-09-09 24:00（UTC+8），�
 ## 工作原理
 
 - **服务端**（`lib/index.js`）注册为 Typert Remote 服务 `usageStats`（通过网关的 SRC 发现机制，无需生成描述符文件）。
-- **浏览器端**（`lib/client.js`）先挂载自身的严格 `usageStats` 贡献，再通过 `ctx.remote.usageStats` 调用认证后的 Remote 命名空间，并通过 `ctx.remote.session.modelCatalog()` 同步模型目录价格。
+- **浏览器端**（`lib/client.js`）先挂载自身的严格 `usageStats` 贡献，再通过精确的 `remote.usageStats` 子服务注入取得 client；静态注入的 `remote.session` 用于同步模型目录价格。
 - **悬浮窗口**通过插件自己的 React root 挂在 `document.body` 上（`position: fixed; right: 20px; bottom: 20px`），卸载时自动移除。
 - **数据回放**：直接回放 `$DSH_HOME/sessions` 下所有会话的持久化日志（zstd 分帧逐帧解码），按 token-meter 语义聚合：`assistant/chunk` 的 usage 为早期样本，`assistant/message` 的 usage 为同一 (turn, step) 的**最终样本并替换**早期样本，因此不会重复计数；当前内存中的活动会话事件也会合并进来。
 - **计费**：费用 = Σ(各桶 token × 对应单价 / 1e6)，单价解析**按提供商自动匹配**：先找 (provider, model) 精确行，再找通用 model 行，最后回退默认单价——每个 AI 提供商（如 opencode-go 与 openai-codex）都按其官方价目各自计费，互不干扰。

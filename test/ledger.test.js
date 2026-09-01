@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { Context } from "@deepseek-ai/cordis";
+import { runInNewContext } from "node:vm";
+import { Context, Service } from "@deepseek-ai/cordis";
 import { remoteMethods } from "@deepseek-ai/dsh-typert-protocol";
 import { SpendAccountingService, SpendLedger, priceUsageMicros, shanghaiMonth } from "../lib/ledger.js";
 import { foldSession } from "../lib/stats.js";
@@ -340,14 +341,137 @@ test("browser client synchronizes catalog prices and decorates every model-menu 
   const source = readFileSync(new URL("../lib/client.js", import.meta.url), "utf8");
   assert.match(source, /await ctx\.remote\.\$mount\(USAGE_STATS_REMOTE\)/);
   assert.match(source, /ctx\.remote\.session\.modelCatalog\(\)/);
-  assert.match(source, /ctx\.remote\.usageStats\[method\]\(request\)/);
+  assert.match(source, /ctx\.inject\(\["remote", "remote\.usageStats"\]/);
+  assert.doesNotMatch(source, /ctx\.remote\.usageStats/);
+  assert.match(source, /usageStats\[method\]\(request\)/);
   assert.doesNotMatch(source, /ctx\.connection/);
-  assert.match(source, /callUsageStats\(ctx, "catalogPricing", \{ models \}\)/);
+  assert.match(source, /callUsageStats\(usageStats, "catalogPricing", \{ models \}\)/);
   assert.match(source, /MutationObserver\(decorate\)/);
   assert.match(source, /data-dsh-spend-model-price/);
   assert.match(source, /MODEL_PRICE_SYNC_DEFAULT_MS = 24 \* 60 \* 60 \* 1000/);
   assert.match(source, /MODEL_PRICE_SYNC_RETRY_MS = 30 \* 1000/);
   assert.match(source, /pricing\.modelUnpriced/);
+});
+
+test("browser client resolves the mounted usageStats namespace through an exact Cordis v4 inject", async () => {
+  let registration;
+  const document = {
+    body: { appendChild: () => {} },
+    head: { appendChild: () => {} },
+    createElement: () => ({ dataset: {}, remove: () => {} }),
+    getElementById: () => null,
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  class TestMutationObserver {
+    observe() {}
+    disconnect() {}
+  }
+  runInNewContext(readFileSync(new URL("../lib/client.js", import.meta.url), "utf8"), {
+    clearTimeout: () => {},
+    console,
+    document,
+    HTMLElement: class {},
+    MutationObserver: TestMutationObserver,
+    setTimeout: () => 1,
+    window: { __ModuleLoader__: { load: (value) => { registration = value; } } },
+  });
+  assert.equal(registration?.id, "dsh-spend");
+  let renderCount = 0;
+  const browser = registration.factory((id) => {
+    if (id === "react") return {};
+    if (id === "react/jsx-runtime") return { Fragment: Symbol("Fragment"), jsx: (type, props) => ({ type, props }) };
+    if (id === "react-dom/client") {
+      return { createRoot: () => ({ render: () => { renderCount++; }, unmount: () => {} }) };
+    }
+    throw new Error(`unexpected browser dependency ${id}`);
+  });
+  assert.deepEqual([...browser.inject], ["locale", "remote", "remote.session"]);
+  assert.equal(browser.inject.includes("remote.usageStats"), false);
+
+  let catalogPricingCalls = 0;
+  const usageStats = {
+    catalogPricing: async () => {
+      catalogPricingCalls++;
+      return { ok: true, value: { currency: "USD", models: [], syncIntervalHours: 24 } };
+    },
+  };
+  let mounted = false;
+  let disposed = false;
+  class TestRemote extends Service {
+    constructor(ctx) {
+      super(ctx, "remote");
+    }
+
+    async $mount(contribution) {
+      assert.equal(contribution.package, "dsh-spend");
+      mounted = true;
+      const child = this.ctx.plugin({
+        name: "remote.usageStats",
+        apply: (ctx) => { ctx.provide("remote.usageStats", usageStats); },
+      });
+      await child.await();
+      return async () => {
+        disposed = true;
+        await child.dispose();
+      };
+    }
+  }
+  class TestLocale extends Service {
+    constructor(ctx) {
+      super(ctx, "locale");
+    }
+
+    register() {
+      return () => {};
+    }
+
+    bind() {
+      return (key) => key;
+    }
+  }
+
+  const ctx = new Context();
+  new TestRemote(ctx);
+  new TestLocale(ctx);
+  const session = ctx.plugin({
+    name: "remote.session",
+    apply: (scope) => {
+      scope.provide("remote.session", {
+        modelCatalog: async () => ({ ok: true, value: { groups: [] } }),
+      });
+    },
+  });
+  await session.await();
+  const fiber = ctx.plugin({
+    inject: browser.inject,
+    apply: async (scope) => {
+      const disposeRemote = await browser.apply(scope);
+      assert.equal(mounted, true);
+      assert.throws(
+        () => scope.remote.usageStats,
+        /cannot get property "remote\.usageStats" without inject/,
+      );
+      return disposeRemote;
+    },
+  });
+  await fiber.await();
+  await Promise.resolve();
+  await Promise.resolve();
+  assert.equal(catalogPricingCalls, 1);
+  assert.equal(renderCount, 1);
+  assert.equal(disposed, false);
+  await fiber.dispose();
+  assert.equal(disposed, true);
+  await session.dispose();
+});
+
+test("package and lockfile versions stay synchronized", () => {
+  const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
+  assert.equal(packageJson.version, "0.6.3");
+  assert.equal(lockfile.version, packageJson.version);
+  assert.equal(lockfile.packages[""].version, packageJson.version);
 });
 
 test("Remote entrypoints use the Gateway principal and reject anonymous or child mutations", async () => {
