@@ -21,6 +21,10 @@ A **floating usage widget** pinned to the bottom-right corner of the dsh Web UI:
 
 ---
 
+## 0.6.4 changes
+
+- Aligns the Cordis and Harness peer dependencies with `0.1.2-alpha.3` so package managers accept an Alpha.3 host, while retaining the explicit `usageStats` client injection and unload cleanup introduced in 0.6.3.
+
 ## 0.6.3 changes
 
 - Fixes the Cordis v4 browser startup failure caused by reading `remote.usageStats` without an exact injection after mounting the Spend Remote. The plugin now mounts the contribution, injects `remote.usageStats`, passes that client to every statistics and pricing call, and disposes the mounted contribution on unload. Host-provided `remote.session` remains a static dependency and does not participate in the dynamic mount.

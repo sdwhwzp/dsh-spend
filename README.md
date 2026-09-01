@@ -23,6 +23,10 @@
 
 ---
 
+## 0.6.4 变更
+
+- 将 Cordis 与 Harness peer 依赖对齐到 `0.1.2-alpha.3`，确保包管理器接受 Alpha.3 宿主；保留 0.6.3 已采用的显式 `usageStats` client 注入与卸载清理。
+
 ## 0.6.3 变更
 
 - 修复 Cordis v4 浏览器端在挂载 Spend Remote 后未经精确注入直接读取 `remote.usageStats` 的启动错误。插件现在先挂载贡献，再注入 `remote.usageStats` 并把取得的 client 传给全部统计与价表调用，卸载时释放挂载贡献；宿主提供的 `remote.session` 继续作为静态依赖注入，不参与动态挂载。

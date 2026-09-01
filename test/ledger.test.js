@@ -469,9 +469,12 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.3");
+  assert.equal(packageJson.version, "0.6.4");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
+  assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
+  assert.equal(packageJson.peerDependencies["@deepseek-ai/dsh-api-remotes"], "^0.1.2-alpha.3");
+  assert.equal(packageJson.peerDependencies["@deepseek-ai/dsh-api-session-controller"], "^0.1.2-alpha.3");
 });
 
 test("Remote entrypoints use the Gateway principal and reject anonymous or child mutations", async () => {
