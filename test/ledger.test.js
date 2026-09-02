@@ -257,7 +257,7 @@ test("pricing mutation endpoints enforce admin authority and refresh accounting"
   assert.equal(reconciled, 2);
 });
 
-test("catalog pricing covers every visible model and marks unknown routes unpriced", async () => {
+test("catalog pricing covers every visible model in CNY and marks unknown routes unpriced", async () => {
   assert.deepEqual(normalizeCatalogModels({ models: [
     { provider: " codex ", model: "gpt-5.6-sol" },
     { provider: "codex", model: "gpt-5.6-sol" },
@@ -269,7 +269,7 @@ test("catalog pricing covers every visible model and marks unknown routes unpric
   assert.throws(() => normalizeCatalogModels({ models: [{ provider: "", model: "x" }] }), /provider/);
 
   const service = {
-    currency: "CNY",
+    currency: "USD",
     usdCnyRate: 7.2,
     syncIntervalHours: 24,
     pricingFor: () => [{
@@ -469,7 +469,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.4");
+  assert.equal(packageJson.version, "0.6.5");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");

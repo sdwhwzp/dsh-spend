@@ -21,6 +21,10 @@ A **floating usage widget** pinned to the bottom-right corner of the dsh Web UI:
 
 ---
 
+## 0.6.5 changes
+
+- Model-menu input, cache-read, cache-write, and output rates now always render in CNY instead of following the Spend dashboard's USD/CNY switch.
+
 ## 0.6.4 changes
 
 - Aligns the Cordis and Harness peer dependencies with `0.1.2-alpha.3` so package managers accept an Alpha.3 host, while retaining the explicit `usageStats` client injection and unload cleanup introduced in 0.6.3.
@@ -42,7 +46,7 @@ A **floating usage widget** pinned to the bottom-right corner of the dsh Web UI:
 - 📤 **Data export**: call details exportable as CSV / JSON / call-log CSV, viewable in a separate window
 - 🔁 **Auto-refresh**: every 30s by default (server-side interval, no frontend change needed); manual refresh available in-panel
 
-The model menu shows input, cache-read, cache-write and output rates in the current currency under every model name (per million tokens). The browser synchronizes the live visible-model catalog with Spend at startup, immediately after an administrator changes an internal rate, and every 24 hours. A route without an exact or generic model rate says “Unpriced”; the dashboard fallback is never presented as a personal-debit rate.
+The model menu shows input, cache-read, cache-write and output rates only in CNY under every model name (per million tokens), independently of the dashboard's USD/CNY switch. The browser synchronizes the live visible-model catalog with Spend at startup, immediately after an administrator changes an internal rate, and every 24 hours. A route without an exact or generic model rate says “Unpriced”; the dashboard fallback is never presented as a personal-debit rate.
 
 ## Principal-scoped accounting ledger and access control
 
