@@ -21,6 +21,10 @@ A **floating usage widget** pinned to the bottom-right corner of the dsh Web UI:
 
 ---
 
+## 0.6.6 changes
+
+- Targets DeepSeek Harness `0.1.3-alpha.1` and declares Harness peer dependencies as `^0.1.3-alpha.1`.
+
 ## 0.6.5 changes
 
 - Model-menu input, cache-read, cache-write, and output rates now always render in CNY instead of following the Spend dashboard's USD/CNY switch.
@@ -161,6 +165,8 @@ Credentials are reused read-only from local CLI logins and the credentials seam:
 - **Snapshot caching**: snapshots are cached behind a signature of file sizes + mtimes + live event counts; unchanged data returns from cache.
 
 ## Installation
+
+Version `0.6.6` targets DeepSeek Harness `0.1.3-alpha.1`. Resolve every Harness peer from the same runtime release when deploying.
 
 The package ships a `dsh.bundle` manifest, so `dsh plugin add` mounts it as a profile layer automatically — **no manual profile editing needed**:
 
