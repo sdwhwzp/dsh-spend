@@ -494,7 +494,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.13");
+  assert.equal(packageJson.version, "0.6.14");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -558,7 +558,7 @@ test("Remote entrypoints use the Gateway principal and reject anonymous or child
   ]);
 });
 
-test("Spend exposes all four alpha.1 source-mode Remote markers", async () => {
+test("Spend exposes every alpha.1 source-mode Remote marker", async () => {
   const directory = mkdtempSync(join(tmpdir(), "dsh-spend-remote-"));
   const ctx = new Context();
   try {
@@ -571,6 +571,7 @@ test("Spend exposes all four alpha.1 source-mode Remote markers", async () => {
     assert.equal(service.typertRemote.namespace, "usageStats");
     assert.deepEqual(remoteMethods(service), [
       { method: "query", invocation: { kind: "direct" } },
+      { method: "sessionCost", invocation: { kind: "direct" } },
       { method: "catalogPricing", invocation: { kind: "direct" } },
       { method: "savePricing", invocation: { kind: "direct" } },
       { method: "deletePricing", invocation: { kind: "direct" } },
@@ -750,4 +751,41 @@ test("costRatesAt quotes the table the ledger would charge, in both currencies",
   // off-peak one the calendar would otherwise resolve.
   const saturday = at("2026-09-12T10:00:00+08:00");
   assert.equal(saturday.usd.flash.peak.out, after.usd.flash.peak.out);
+});
+
+test("sessionCost answers per session and never leaks another principal's", async () => {
+  const snapshot = {
+    bySession: [
+      { sessionId: "mine", cost: 1.25, calls: 3 },
+      { sessionId: "also-mine", cost: 0.5, calls: 1 },
+    ],
+    bySessionModel: [
+      { sessionId: "mine", model: "deepseek-v4-flash", provider: "deepseek-official", calls: 2, cost: 1 },
+      { sessionId: "mine", model: "GLM-5.3-Flash", provider: "zai", calls: 1, cost: 0.25 },
+      { sessionId: "also-mine", model: "k3", provider: "kimi-coding", calls: 1, cost: 0.5 },
+    ],
+  };
+  const service = {
+    currency: "CNY",
+    snapshotFor: async () => snapshot,
+    sessionCostForPrincipal: UsageStatsService.prototype.sessionCostForPrincipal,
+  };
+  const ask = (sessionId) => service.sessionCostForPrincipal.call(service, { sessionId }, alice);
+
+  const mine = await ask("mine");
+  assert.equal(mine.cost, 1.25);
+  assert.equal(mine.calls, 3);
+  assert.equal(mine.currency, "CNY");
+  // Every model the ledger prices, not one provider's family.
+  assert.deepEqual(mine.byModel.map((row) => row.model), ["deepseek-v4-flash", "GLM-5.3-Flash"]);
+
+  // A session absent from the caller's own snapshot prices as nothing rather
+  // than reporting another principal's spend.
+  const theirs = await ask("someone-elses");
+  assert.equal(theirs.cost, null);
+  assert.equal(theirs.calls, 0);
+  assert.deepEqual(theirs.byModel, []);
+
+  await assert.rejects(service.sessionCostForPrincipal.call(service, { sessionId: "mine" }, undefined), /authenticated principal/);
+  await assert.rejects(service.sessionCostForPrincipal.call(service, {}, alice), /sessionId required/);
 });
