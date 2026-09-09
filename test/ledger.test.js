@@ -494,7 +494,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.9");
+  assert.equal(packageJson.version, "0.6.10");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -705,5 +705,23 @@ test("administrator price overrides persist and stamp their own price version", 
     second.close();
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("the subscription routes this deployment uses all resolve to a rate", () => {
+  // Each pair is a (provider, model) seen in production logs; an empty
+  // provider table silently bills them at the DeepSeek default row instead.
+  for (const [provider, model, expected] of [
+    ["codex", "gpt-5.6-sol", { inputPerMillion: 4, outputPerMillion: 20 }],
+    ["codex", "gpt-5.6-luna", { inputPerMillion: 0.2, outputPerMillion: 1.2 }],
+    ["codex", "gpt-6-astra", { inputPerMillion: 10, outputPerMillion: 50 }],
+    ["kimi-coding", "kimi-for-coding", { inputPerMillion: 2.82, outputPerMillion: 14.08 }],
+    ["kimi-coding", "k3-256k", { inputPerMillion: 2.82, outputPerMillion: 14.08 }],
+  ]) {
+    const rates = autoRatesFor(normalizeProvider(provider));
+    const row = rates.find((candidate) => candidate.model === model);
+    assert.ok(row, `${provider}/${model} has no rate row`);
+    assert.equal(row.inputPerMillion, expected.inputPerMillion);
+    assert.equal(row.outputPerMillion, expected.outputPerMillion);
   }
 });
