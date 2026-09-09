@@ -22,6 +22,8 @@
 
 `sessionCost` 与 `costRatesAt` 供 dsh-context 的费用卡取数，见部署手册 §45。上游无此接口，其 Remote 名单只有四项。
 
+`sessionCost` 的返回值除金额外还带**已计费 token 用量**（会话级与每模型各四路：input / output / cacheRead / cacheWrite），因为这些 token 正是金额的计算依据；`reasoningTokens` 不随行，供应商已把它计入 output，再加一次会重复计费。`calls` 保留在线上仅为兼容旧版 dsh-context，新版费用卡不再展示调用次数。
+
 ## 4. PlansSection 的实时用量行：本分支已修复的上游缺陷
 
 **上游做法**（`e3534f1`，2026-08-25，订阅商实时额度）：code 型计划卡里 `liveBody`（读 `providerUsage.fetchedAt`）与 `liveErrorNote`（读 `providerUsage.error`）在渲染时急切构造，消费处才按 `showLive` / `liveFailed` 门控。

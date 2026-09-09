@@ -496,7 +496,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.20");
+  assert.equal(packageJson.version, "0.6.21");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -799,15 +799,18 @@ test("costRatesAt quotes the table the ledger would charge, in both currencies",
 });
 
 test("sessionCost answers per session and never leaks another principal's", async () => {
+  const usage = (input, output, read, write) => ({
+    inputTokens: input, outputTokens: output, cacheReadTokens: read, cacheWriteTokens: write, reasoningTokens: 7,
+  });
   const snapshot = {
     bySession: [
-      { sessionId: "mine", cost: 1.25, calls: 3 },
-      { sessionId: "also-mine", cost: 0.5, calls: 1 },
+      { sessionId: "mine", cost: 1.25, calls: 3, ...usage(300, 40, 900, 60) },
+      { sessionId: "also-mine", cost: 0.5, calls: 1, ...usage(10, 2, 0, 0) },
     ],
     bySessionModel: [
-      { sessionId: "mine", model: "deepseek-v4-flash", provider: "deepseek-official", calls: 2, cost: 1 },
-      { sessionId: "mine", model: "GLM-5.3-Flash", provider: "zai", calls: 1, cost: 0.25 },
-      { sessionId: "also-mine", model: "k3", provider: "kimi-coding", calls: 1, cost: 0.5 },
+      { sessionId: "mine", model: "deepseek-v4-flash", provider: "deepseek-official", calls: 2, cost: 1, ...usage(200, 30, 900, 60) },
+      { sessionId: "mine", model: "GLM-5.3-Flash", provider: "zai", calls: 1, cost: 0.25, ...usage(100, 10, 0, 0) },
+      { sessionId: "also-mine", model: "k3", provider: "kimi-coding", calls: 1, cost: 0.5, ...usage(10, 2, 0, 0) },
     ],
   };
   const service = {
@@ -823,6 +826,17 @@ test("sessionCost answers per session and never leaks another principal's", asyn
   assert.equal(mine.currency, "CNY");
   // Every model the ledger prices, not one provider's family.
   assert.deepEqual(mine.byModel.map((row) => row.model), ["deepseek-v4-flash", "GLM-5.3-Flash"]);
+  // The billed token usage the money was computed from travels with it, at
+  // the session level and per model; reasoning tokens stay inside output.
+  assert.deepEqual(
+    { i: mine.inputTokens, o: mine.outputTokens, r: mine.cacheReadTokens, w: mine.cacheWriteTokens },
+    { i: 300, o: 40, r: 900, w: 60 },
+  );
+  assert.equal(mine.reasoningTokens, undefined);
+  assert.deepEqual(
+    mine.byModel.map((row) => [row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheWriteTokens]),
+    [[200, 30, 900, 60], [100, 10, 0, 0]],
+  );
 
   // A session absent from the caller's own snapshot prices as nothing rather
   // than reporting another principal's spend.
@@ -830,6 +844,10 @@ test("sessionCost answers per session and never leaks another principal's", asyn
   assert.equal(theirs.cost, null);
   assert.equal(theirs.calls, 0);
   assert.deepEqual(theirs.byModel, []);
+  assert.deepEqual(
+    { i: theirs.inputTokens, o: theirs.outputTokens, r: theirs.cacheReadTokens, w: theirs.cacheWriteTokens },
+    { i: 0, o: 0, r: 0, w: 0 },
+  );
 
   await assert.rejects(service.sessionCostForPrincipal.call(service, { sessionId: "mine" }, undefined), /authenticated principal/);
   await assert.rejects(service.sessionCostForPrincipal.call(service, {}, alice), /sessionId required/);
