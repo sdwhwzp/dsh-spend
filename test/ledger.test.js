@@ -7,7 +7,7 @@ import { runInNewContext } from "node:vm";
 import { Context, Service } from "@deepseek-ai/cordis";
 import { remoteMethods } from "@deepseek-ai/dsh-typert-protocol";
 import { SpendAccountingService, SpendLedger, priceUsageMicros, shanghaiMonth } from "../lib/ledger.js";
-import { foldSession } from "../lib/stats.js";
+import { foldSession, resolvePrice } from "../lib/stats.js";
 import { assertPricingAdministrator, callsForPrincipal, normalizeCatalogModels, normalizePricingOverride, planDisclosureForPrincipal, planForDisplay, pricingForDisplay, principalOptionsFor, registerDailyReconciliation, UsageStatsService } from "../lib/index.js";
 import { autoPlanFor, autoRatesFor, normalizeProvider } from "../lib/knowledge.js";
 
@@ -120,28 +120,53 @@ test("zai provider prices every GLM model visible on server 28", () => {
   }), rates, 7.2).amountMicros, 1_080_000);
 });
 
-test("DeepSeek vision experimental calls use the V4 Pro internal rate", () => {
+test("DeepSeek Flash, its vision route and the dated 4.1 preview share one rate", () => {
   const rates = autoRatesFor("deepseek-official");
-  const pro = rates.find((row) => row.model === "deepseek-v4-pro");
+  const flash = rates.find((row) => row.model === "deepseek-v4-flash");
   const vision = rates.find((row) => row.model === "deepseek-v4-flash-vision-exp");
-  assert.ok(pro);
-  assert.ok(vision);
-  assert.deepEqual(
-    { ...vision, model: "deepseek-v4-pro" },
-    pro,
-  );
+  const dated = rates.find((row) => row.model === "deepseek-v4.1-flash-expires-on-0910");
+  const pro = rates.find((row) => row.model === "deepseek-v4-pro");
+  assert.ok(flash && vision && dated && pro);
+  // The vision route carries no premium over text Flash, and the dated
+  // preview bills the same; none of them follow the Pro rate.
+  for (const row of [vision, dated]) {
+    assert.deepEqual({ ...row, model: flash.model }, flash);
+  }
+  assert.notDeepEqual({ ...vision, model: pro.model }, pro);
 
   for (const time of [
     Date.parse("2026-08-16T12:00:00+08:00"),
     Date.parse("2026-08-20T10:00:00+08:00"),
     Date.parse("2026-08-20T20:00:00+08:00"),
+    Date.parse("2026-09-11T10:00:00+08:00"),
   ]) {
     const usage = { inputTokens: 1_000_000, outputTokens: 1_000_000, time };
-    assert.equal(
-      priceUsageMicros(call({ ...usage, provider: "deepseek-official", model: vision.model }), rates, 7.2).amountMicros,
-      priceUsageMicros(call({ ...usage, provider: "deepseek-official", model: pro.model }), rates, 7.2).amountMicros,
-    );
+    for (const row of [vision, dated]) {
+      assert.equal(
+        priceUsageMicros(call({ ...usage, provider: "deepseek-official", model: row.model }), rates, 7.2).amountMicros,
+        priceUsageMicros(call({ ...usage, provider: "deepseek-official", model: flash.model }), rates, 7.2).amountMicros,
+      );
+    }
   }
+});
+
+test("DeepSeek Flash follows each published table at the call's own time", () => {
+  const rates = autoRatesFor("deepseek-official");
+  const priceAt = (iso) => resolvePrice("deepseek-v4-flash", "deepseek-official", rates, undefined, Date.parse(iso));
+
+  // Before peak pricing began: the flat legacy rate.
+  assert.equal(priceAt("2026-08-16T10:00:00+08:00").outputPerMillion, 0.28);
+  // 2026-08-17 table: peak applied every day, weekends included.
+  assert.equal(priceAt("2026-08-20T10:00:00+08:00").outputPerMillion, 1.32);
+  assert.equal(priceAt("2026-08-22T10:00:00+08:00").outputPerMillion, 1.32);
+  assert.equal(priceAt("2026-08-20T20:00:00+08:00").outputPerMillion, 0.66);
+  // 2026-09-10 12:00 table: cheaper, and the peak narrows to weekdays.
+  assert.equal(priceAt("2026-09-11T10:00:00+08:00").outputPerMillion, 1.111111);
+  assert.equal(priceAt("2026-09-11T20:00:00+08:00").outputPerMillion, 0.555556);
+  // 2026-09-12 is a Saturday: a peak hour on a non-working day stays off-peak.
+  assert.equal(priceAt("2026-09-12T10:00:00+08:00").outputPerMillion, 0.555556);
+  assert.equal(priceAt("2026-09-11T10:00:00+08:00").cacheReadPerMillion, 0.005556);
+  assert.equal(priceAt("2026-09-11T20:00:00+08:00").cacheReadPerMillion, 0.002778);
 });
 
 test("durable turn/step principals survive shared-session folding", () => {
@@ -469,7 +494,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.8");
+  assert.equal(packageJson.version, "0.6.9");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");

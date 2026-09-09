@@ -254,7 +254,9 @@ config:
 
 插件按此计次：搜索归属到发起它的那一步（因而继承该步的用户），并按**搜索自身的模型**解析价格行，取其 `searchPerCall`。DeepSeek 官方并未公布按次的搜索费（搜索按承载模型的 token 计费），所以 `searchPerCall` 是部署方设定的单次均价；默认 0，此时搜索只计次、不产生费用。要精确到 token，需要搜索提供方把响应用量也写进会话日志。
 
-- DeepSeek：[官方定价页](https://api-docs.deepseek.com/quick_start/pricing/)（2026-08-14 抓取）。\*DeepSeek 的上下文硬盘缓存自动生效、**无单独缓存写入计费项**，故 `cacheWritePerMillion: 0`。
+- DeepSeek：[官方定价页](https://api-docs.deepseek.com/quick_start/pricing/)（2026-08-14 抓取；峰谷表 2026-09-09 复核）。\*DeepSeek 的上下文硬盘缓存自动生效、**无单独缓存写入计费项**，故 `cacheWritePerMillion: 0`。
+  Flash 系列有两张先后生效的表：**2026-08-17** 起引入峰谷，高峰为**每日** 9:00–12:00、14:00–18:00（北京时间），高峰价为闲时 2 倍；**2026-09-10 12:00** 起闲时降为每百万 token 缓存命中 ¥0.02 / 缓存未命中 ¥1 / 输出 ¥4（较前降 60% / 33.3% / 11.1%），高峰仍为 2 倍，但收窄为**工作日**同样两个时段，非工作日全天按闲时计。表中为按 7.2 汇率折算的美元价，`schedule.phases` 按调用自身时间戳选表，`peakDays` 表达工作日限制。
+  `deepseek-v4-flash-vision-exp` 与 `deepseek-v4.1-flash-expires-on-0910` **与文本版 Flash 同价**（视觉无溢价，单图最多 384 token），不再沿用 V4 Pro 的内部折算价。
 - OpenAI：[官方定价页](https://platform.openai.com/docs/pricing)（2026-07-30 降价后），缓存写 = 未命中输入 × 1.25。Luna 已降 80%（$1→$0.20 输入 / $6→$1.20 输出）。
 - 智谱 GLM：[Z.AI 官方定价页](https://docs.z.ai/guides/overview/pricing)，`zai` / `z-ai` / `glm` provider 自动匹配智谱价表；缓存存储当前限时免费，因此缓存写为 0。
 - ⚡ **DeepSeek 峰谷计价已内置**（2026-08-17 00:00 北京时间生效；高峰 09:00–12:00 / 14:00–18:00 本地时间，其余空闲为高峰一半）：v4-flash 高峰 $0.014(命中)/$0.44(未命中)/$1.32(输出)、空闲减半；v4-pro 高峰 $0.044/$1.32/$3.96、空闲减半。实验视觉路由 `deepseek-v4-flash-vision-exp` 按内部策略完全沿用 v4-pro 的 legacy 与峰谷价格，直到 DeepSeek 公布独立价格。计价行可带 `schedule`（`effectiveAt` + `peakHours` + `peak`/`offPeak` 价格），**每条调用按自身发生时刻与时段计价**——8/17 前按上表 legacy 价，之后按峰谷价，历史调用不重算（计费单价表中带"峰谷计价"徽章）。
