@@ -494,7 +494,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.15");
+  assert.equal(packageJson.version, "0.6.16");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -788,4 +788,17 @@ test("sessionCost answers per session and never leaks another principal's", asyn
 
   await assert.rejects(service.sessionCostForPrincipal.call(service, { sessionId: "mine" }, undefined), /authenticated principal/);
   await assert.rejects(service.sessionCostForPrincipal.call(service, {}, alice), /sessionId required/);
+});
+
+test("display conversion reaches the rates inside a republished table", () => {
+  const row = {
+    model: "m", inputPerMillion: 1, outputPerMillion: 2, cacheReadPerMillion: 0, cacheWritePerMillion: 0,
+    schedule: { phases: [{ effectiveAt: "2026-01-01T00:00:00+08:00", peak: { inputPerMillion: 4 }, offPeak: { inputPerMillion: 2 } }] },
+  };
+  const [scaled] = pricingForDisplay([row], undefined, "CNY", 7.2).pricing;
+  assert.equal(scaled.inputPerMillion, 7.2);
+  // Without the phases branch these stay in USD while the row around them is CNY.
+  assert.equal(scaled.schedule.phases[0].peak.inputPerMillion, 28.8);
+  assert.equal(scaled.schedule.phases[0].offPeak.inputPerMillion, 14.4);
+  assert.equal(scaled.schedule.phases[0].effectiveAt, "2026-01-01T00:00:00+08:00");
 });
