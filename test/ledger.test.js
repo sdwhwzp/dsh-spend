@@ -469,7 +469,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.7");
+  assert.equal(packageJson.version, "0.6.8");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
