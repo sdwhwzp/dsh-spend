@@ -494,7 +494,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.12");
+  assert.equal(packageJson.version, "0.6.13");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -725,4 +725,29 @@ test("the subscription routes this deployment uses all resolve to a rate", () =>
     assert.equal(row.inputPerMillion, expected.inputPerMillion);
     assert.equal(row.outputPerMillion, expected.outputPerMillion);
   }
+});
+
+test("costRatesAt quotes the table the ledger would charge, in both currencies", () => {
+  const service = {
+    pricing: [], defaultPricing: undefined, usdCnyRate: 7.2,
+    ledger: { pricingOverrides: () => [] },
+    pricingFor: UsageStatsService.prototype.pricingFor,
+  };
+  const at = (iso) => UsageStatsService.prototype.costRatesAt.call(service, Date.parse(iso));
+
+  // Under the 2026-08-17 table an off-peak output token costs USD 0.66/M.
+  const before = at("2026-09-01T10:00:00+08:00");
+  assert.equal(before.usd.flash.off.out, 0.66);
+  assert.equal(before.usd.flash.peak.out, 1.32);
+
+  // Under the 2026-09-10 table it drops, and CNY follows the configured rate.
+  const after = at("2026-09-15T10:00:00+08:00");
+  assert.equal(after.usd.flash.off.out, 0.555556);
+  assert.equal(after.usd.flash.peak.out, 1.111111);
+  assert.ok(Math.abs(after.cny.flash.off.out - 0.555556 * 7.2) < 1e-9);
+
+  // A weekend caller still sees the weekday peak rate rather than the
+  // off-peak one the calendar would otherwise resolve.
+  const saturday = at("2026-09-12T10:00:00+08:00");
+  assert.equal(saturday.usd.flash.peak.out, after.usd.flash.peak.out);
 });
