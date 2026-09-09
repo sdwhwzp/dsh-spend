@@ -205,3 +205,77 @@ test("scanSessions streams zstd frames and reuses unchanged durable files", asyn
     await rm(root, { recursive: true, force: true });
   }
 });
+
+/**
+ * Delegated sessions: a subagent's own turns carry no principal, so its calls
+ * are unowned unless ownership resolves through the session that spawned it.
+ */
+test("a delegated session's calls inherit the spawning session's owner", async () => {
+  const { scanSessions } = await import("../lib/stats.js");
+  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const alice = { source: "dsh-passwords", id: "3", username: "u3", role: "user" };
+  const root = await mkdtemp(join(tmpdir(), "dsh-spend-delegated-"));
+  const { zstdCompressSync } = await import("node:zlib");
+  const write = async (dir, header, events, name = "session.v3.jsonl.zstd") => {
+    await mkdir(join(root, "ws", dir), { recursive: true });
+    const body = [header, ...events].map((e) => JSON.stringify(e)).join("\n") + "\n";
+    await writeFile(join(root, "ws", dir, name), zstdCompressSync(Buffer.from(body)));
+  };
+  const turn = (principal) => [
+    { type: "request/header", time: 1, data: { header: { config: { provider: "p", model: "m" } } } },
+    { type: "step/start", time: 2, data: { turn: 1, step: 1, ...(principal ? { principal } : {}) } },
+    { type: "assistant/message", time: 3, data: { turn: 1, step: 1, usage: { outputTokens: 10 } } },
+  ];
+  await write("parent", { type: "session", id: "parent", cwd: "/w", createdAt: 1 }, turn(alice));
+  await write("child", { type: "session", id: "child", cwd: "/w", createdAt: 2, parentSession: "parent" }, turn(undefined));
+  await write("grandchild", { type: "session", id: "gc", cwd: "/w", createdAt: 3, parentSession: "child" }, turn(undefined));
+  // An orphan names a parent this scan never saw: it stays unowned rather
+  // than being attributed to whoever happened to run nearby.
+  await write("orphan", { type: "session", id: "orphan", cwd: "/w", createdAt: 4, parentSession: "missing" }, turn(undefined));
+
+  const { calls } = await scanSessions(root, []);
+  const bySession = new Map(calls.map((c) => [c.sessionId, c]));
+  assert.equal(bySession.get("parent").principal.id, "3");
+  assert.equal(bySession.get("parent").principalInherited, undefined);
+  // One hop and two hops both resolve to the owner at the top of the chain.
+  assert.equal(bySession.get("child").principal.id, "3");
+  assert.equal(bySession.get("child").principalInherited, true);
+  assert.equal(bySession.get("gc").principal.id, "3");
+  assert.equal(bySession.get("gc").principalInherited, true);
+  assert.equal(bySession.get("orphan").principal, undefined);
+});
+
+test("a migrated session reads its newest generation, not the name it was born with", async () => {
+  const { scanSessions } = await import("../lib/stats.js");
+  const { mkdtemp, mkdir, writeFile } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { zstdCompressSync } = await import("node:zlib");
+  const root = await mkdtemp(join(tmpdir(), "dsh-spend-generation-"));
+  const dir = join(root, "ws", "s1");
+  await mkdir(dir, { recursive: true });
+  const body = (outputTokens, id = "s1") => zstdCompressSync(Buffer.from([
+    { type: "session", id, cwd: "/w", createdAt: 1 },
+    { type: "request/header", time: 1, data: { header: { config: { provider: "p", model: "m" } } } },
+    { type: "step/start", time: 2, data: { turn: 1, step: 1 } },
+    { type: "assistant/message", time: 3, data: { turn: 1, step: 1, usage: { outputTokens } } },
+  ].map((e) => JSON.stringify(e)).join("\n") + "\n"));
+
+  // A migration adds the successor beside the predecessor and never rewrites
+  // it, so the older file stays behind with the older totals.
+  await writeFile(join(dir, "session.jsonl.zstd"), body(1));
+  await writeFile(join(dir, "session.v2.jsonl.zstd"), body(2));
+  await writeFile(join(dir, "session.v3.jsonl.zstd"), body(3));
+  const migrated = await scanSessions(root, []);
+  assert.equal(migrated.calls.length, 1);
+  assert.equal(migrated.calls[0].outputTokens, 3);
+
+  // A session that never migrated still reads generation zero.
+  const plain = join(root, "ws", "s2");
+  await mkdir(plain, { recursive: true });
+  await writeFile(join(plain, "session.jsonl.zstd"), body(7, "s2"));
+  const both = await scanSessions(root, []);
+  assert.deepEqual(both.calls.map((c) => c.outputTokens).sort((a, b) => a - b), [3, 7]);
+});
