@@ -496,7 +496,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.18");
+  assert.equal(packageJson.version, "0.6.19");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -560,6 +560,48 @@ test("Remote entrypoints use the Gateway principal and reject anonymous or child
   ]);
 });
 
+test("a caught render failure reaches the server log, and only for a signed-in caller", async () => {
+  let principal;
+  const lines = [];
+  const original = console.error;
+  console.error = (line) => lines.push(String(line));
+  const service = { ctx: { typertGateway: { currentPrincipal: () => principal } } };
+  try {
+    await assert.rejects(
+      UsageStatsService.prototype.reportRenderFailure.call(service, { message: "boom" }),
+      /authenticated principal/,
+    );
+    assert.deepEqual(lines, []);
+
+    principal = { source: "dsh-passwords", id: "7", role: "user" };
+    assert.deepEqual(
+      await UsageStatsService.prototype.reportRenderFailure.call(service, {
+        message: "Cannot read properties of undefined",
+        stack: "TypeError\n  at Dashboard",
+        componentStack: "  at Dashboard\n  at WidgetBoundary",
+      }),
+      { recorded: true },
+    );
+    assert.equal(lines.length, 1);
+    assert.match(lines[0], /account=dsh-passwords:7/);
+    assert.match(lines[0], /Cannot read properties of undefined/);
+    assert.match(lines[0], /at Dashboard/);
+    assert.match(lines[0], /at WidgetBoundary/);
+
+    // A caller that sends the wrong types is logged, not thrown at: the report
+    // path must never become a second failure on top of the one it describes.
+    await UsageStatsService.prototype.reportRenderFailure.call(service, { message: 42, stack: null });
+    assert.equal(lines.length, 2);
+    assert.match(lines[1], /message: \n/);
+
+    // Long fields are clipped so one runaway stack cannot flood the log.
+    await UsageStatsService.prototype.reportRenderFailure.call(service, { stack: "x".repeat(5000) });
+    assert.equal(lines[2].match(/x+/)[0].length, 2000);
+  } finally {
+    console.error = original;
+  }
+});
+
 test("Spend exposes every alpha.1 source-mode Remote marker", async () => {
   const directory = mkdtempSync(join(tmpdir(), "dsh-spend-remote-"));
   const ctx = new Context();
@@ -577,6 +619,7 @@ test("Spend exposes every alpha.1 source-mode Remote marker", async () => {
       { method: "catalogPricing", invocation: { kind: "direct" } },
       { method: "savePricing", invocation: { kind: "direct" } },
       { method: "deletePricing", invocation: { kind: "direct" } },
+      { method: "reportRenderFailure", invocation: { kind: "direct" } },
     ]);
   } finally {
     await ctx.fiber.dispose();
