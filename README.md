@@ -204,6 +204,7 @@ config:
       outputPerMillion: 0.28
       cacheReadPerMillion: 0.0028
       cacheWritePerMillion: 0
+      searchPerCall: 0     # 单次全网搜索的均价（见下方说明），留 0 则只计次不计费
   defaultPricing:          # 未知模型的回退单价
     inputPerMillion: 0.14
     outputPerMillion: 0.28
@@ -246,6 +247,12 @@ config:
 | gpt-5.6-sol | $5.00 | $0.50 | $6.25 | $30.00 |
 | gpt-5.6-terra | $2.00 | $0.20 | $2.50 | $12.00 |
 | gpt-5.6-luna | $0.20 | $0.02 | $0.25 | $1.20 |
+
+### 全网搜索（web_search）的计价
+
+`dsh-web-search-deepseek` 每执行一次搜索，会向 DeepSeek 另发一次 `deepseek-v4-flash` 调用，并在会话日志里留下 `web/deepseek-search-llm-request` 事件。这笔调用与主对话分开计费，但**日志只记录请求、不记录响应用量**，因此没有可用的 token 数——可计量的单位只有"派发次数"。
+
+插件按此计次：搜索归属到发起它的那一步（因而继承该步的用户），并按**搜索自身的模型**解析价格行，取其 `searchPerCall`。DeepSeek 官方并未公布按次的搜索费（搜索按承载模型的 token 计费），所以 `searchPerCall` 是部署方设定的单次均价；默认 0，此时搜索只计次、不产生费用。要精确到 token，需要搜索提供方把响应用量也写进会话日志。
 
 - DeepSeek：[官方定价页](https://api-docs.deepseek.com/quick_start/pricing/)（2026-08-14 抓取）。\*DeepSeek 的上下文硬盘缓存自动生效、**无单独缓存写入计费项**，故 `cacheWritePerMillion: 0`。
 - OpenAI：[官方定价页](https://platform.openai.com/docs/pricing)（2026-07-30 降价后），缓存写 = 未命中输入 × 1.25。Luna 已降 80%（$1→$0.20 输入 / $6→$1.20 输出）。
