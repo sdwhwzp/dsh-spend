@@ -404,7 +404,9 @@ test("browser client resolves the mounted usageStats namespace through an exact 
   assert.equal(registration?.id, "dsh-spend");
   let renderCount = 0;
   const browser = registration.factory((id) => {
-    if (id === "react") return {};
+    // The widget wraps itself in an error boundary, which React implements as
+    // a class; the stub carries the base the boundary extends.
+    if (id === "react") return { Component: class {} };
     if (id === "react/jsx-runtime") return { Fragment: Symbol("Fragment"), jsx: (type, props) => ({ type, props }) };
     if (id === "react-dom/client") {
       return { createRoot: () => ({ render: () => { renderCount++; }, unmount: () => {} }) };
@@ -494,7 +496,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.17");
+  assert.equal(packageJson.version, "0.6.18");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
