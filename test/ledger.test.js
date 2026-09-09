@@ -494,7 +494,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.11");
+  assert.equal(packageJson.version, "0.6.12");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -716,6 +716,7 @@ test("the subscription routes this deployment uses all resolve to a rate", () =>
     ["codex", "gpt-5.6-luna", { inputPerMillion: 0.2, outputPerMillion: 1.2 }],
     ["codex", "gpt-6-astra", { inputPerMillion: 10, outputPerMillion: 50 }],
     ["kimi-coding", "kimi-for-coding", { inputPerMillion: 0.92, outputPerMillion: 3.8 }],
+    ["kimi-coding", "kimi-for-coding-highspeed", { inputPerMillion: 1.83, outputPerMillion: 7.61 }],
     ["kimi-coding", "k3-256k", { inputPerMillion: 2.82, outputPerMillion: 14.08 }],
   ]) {
     const rates = autoRatesFor(normalizeProvider(provider));
