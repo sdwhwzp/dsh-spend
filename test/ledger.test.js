@@ -169,6 +169,42 @@ test("DeepSeek Flash follows each published table at the call's own time", () =>
   assert.equal(priceAt("2026-09-11T20:00:00+08:00").cacheReadPerMillion, 0.002778);
 });
 
+test("DeepSeek Pro follows the same republished table as Flash", () => {
+  const rates = autoRatesFor("deepseek-official");
+  const priceAt = (iso) => resolvePrice("deepseek-v4-pro", "deepseek-official", rates, undefined, Date.parse(iso));
+  // The vendor publishes CNY; this deployment prices in USD at 7.2, so the
+  // assertions convert back and pin the published figures themselves. The
+  // stored USD values carry six decimals, so the round trip lands within a
+  // ten-thousandth of a fen — rounded there, the vendor's own figures.
+  const cny = (value) => Math.round(value * 7.2 * 1e4) / 1e4;
+
+  // Before peak pricing began: the flat legacy rate.
+  assert.equal(priceAt("2026-08-16T10:00:00+08:00").outputPerMillion, 0.87);
+  // 2026-08-17 table: peak applied every day, weekends included.
+  assert.equal(priceAt("2026-08-22T10:00:00+08:00").outputPerMillion, 3.96);
+  // 2026-09-10 12:00 table: CNY 0.30 / 9 / 27 at peak, half off-peak.
+  const peak = priceAt("2026-09-11T10:00:00+08:00");
+  assert.deepEqual(
+    [cny(peak.cacheReadPerMillion), cny(peak.inputPerMillion), cny(peak.outputPerMillion)],
+    [0.3, 9, 27],
+  );
+  const off = priceAt("2026-09-11T20:00:00+08:00");
+  assert.deepEqual(
+    [cny(off.cacheReadPerMillion), cny(off.inputPerMillion), cny(off.outputPerMillion)],
+    [0.15, 4.5, 13.5],
+  );
+  // 2026-09-12 is a Saturday: the narrowed peak no longer covers it.
+  assert.equal(priceAt("2026-09-12T10:00:00+08:00").outputPerMillion, off.outputPerMillion);
+});
+
+test("the renamed DeepSeek Flash route prices as Flash, not as the default row", () => {
+  const rates = autoRatesFor("deepseek-official");
+  const renamed = rates.find((row) => row.model === "deepseek-flash");
+  const flash = rates.find((row) => row.model === "deepseek-v4-flash");
+  assert.ok(renamed, "the vendor's current model id has a row");
+  assert.deepEqual({ ...renamed, model: flash.model }, flash);
+});
+
 test("durable turn/step principals survive shared-session folding", () => {
   const events = [
     { type: "turn/start", time: 1, data: { turn: 1, principal: alice } },
@@ -496,7 +532,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.26");
+  assert.equal(packageJson.version, "0.6.27");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");

@@ -14,9 +14,11 @@
         maxRecentCalls: 50       # max recent calls
         seriesHours: 168         # time-series window in hours (zero-filled; UI offers 24h/72h/7d)
         refreshSeconds: 30       # floating-window auto-refresh interval (s)
-        syncIntervalHours: 24    # background usage reconciliation and model-price refresh cadence
+        syncIntervalHours: 24    # ledger reconciliation cadence: re-scans the logs and re-prices
+                                 # them against the CURRENT table. Prices are never fetched; they
+                                 # ship in lib/knowledge.js or come from dashboard overrides.
         usdCnyRate: 7.2          # fixed FX used by the dashboard and principal ledger
-        priceVersion: '2026-08-27'
+        priceVersion: '2026-09-11'
         fxVersion: 'fixed-2026-08-21'
         liveRate: true           # host refreshes a live USD→CNY quote (6h cache) when reachable
         # pricing: [...]         # optional explicit per-model rates (overrides auto-detection)
