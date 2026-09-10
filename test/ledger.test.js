@@ -496,7 +496,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.21");
+  assert.equal(packageJson.version, "0.6.22");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -816,6 +816,7 @@ test("sessionCost answers per session and never leaks another principal's", asyn
   const service = {
     currency: "CNY",
     snapshotFor: async () => snapshot,
+    getRates: async () => ({ USD: 1, CNY: 7.13, source: "live", at: 0 }),
     sessionCostForPrincipal: UsageStatsService.prototype.sessionCostForPrincipal,
   };
   const ask = (sessionId) => service.sessionCostForPrincipal.call(service, { sessionId }, alice);
@@ -833,6 +834,9 @@ test("sessionCost answers per session and never leaks another principal's", asyn
     { i: 300, o: 40, r: 900, w: 60 },
   );
   assert.equal(mine.reasoningTokens, undefined);
+  // The display quote travels too: `cost` is in the base currency, and the
+  // dashboard converts before printing.
+  assert.deepEqual(mine.rates, { USD: 1, CNY: 7.13, source: "live" });
   assert.deepEqual(
     mine.byModel.map((row) => [row.inputTokens, row.outputTokens, row.cacheReadTokens, row.cacheWriteTokens]),
     [[200, 30, 900, 60], [100, 10, 0, 0]],
