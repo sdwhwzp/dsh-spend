@@ -24,6 +24,8 @@
 
 `sessionCost` 的返回值除金额外还带**已计费 token 用量**（会话级与每模型各四路：input / output / cacheRead / cacheWrite），因为这些 token 正是金额的计算依据；`reasoningTokens` 不随行，供应商已把它计入 output，再加一次会重复计费。`calls` 保留在线上仅为兼容旧版 dsh-context，新版费用卡不再展示调用次数。
 
+该接口按**会话族**聚合，不是单行：工作流成员、子代理与被续接的会话各自带 `parentSession` 单独记账，只读 `sessionId` 那一行会漏掉整棵树的开销与模型。快照因此新增 `sessionParents`（仅限调用者自己可见的树），聚合走未截断的 `bySessionModel`（`bySession` 受 `maxSessions` 截断），返回值多一个 `sessions` 说明合并了几个会话。
+
 ## 4. PlansSection 的实时用量行：本分支已修复的上游缺陷
 
 **上游做法**（`e3534f1`，2026-08-25，订阅商实时额度）：code 型计划卡里 `liveBody`（读 `providerUsage.fetchedAt`）与 `liveErrorNote`（读 `providerUsage.error`）在渲染时急切构造，消费处才按 `showLive` / `liveFailed` 门控。

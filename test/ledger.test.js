@@ -8,7 +8,7 @@ import { Context, Service } from "@deepseek-ai/cordis";
 import { remoteMethods } from "@deepseek-ai/dsh-typert-protocol";
 import { SpendAccountingService, SpendLedger, priceUsageMicros, shanghaiMonth } from "../lib/ledger.js";
 import { foldSession, resolvePrice } from "../lib/stats.js";
-import { assertPricingAdministrator, callsForPrincipal, normalizeCatalogModels, normalizePricingOverride, planDisclosureForPrincipal, planForDisplay, pricingForDisplay, principalOptionsFor, registerDailyReconciliation, UsageStatsService } from "../lib/index.js";
+import { assertPricingAdministrator, callsForPrincipal, normalizeCatalogModels, normalizePricingOverride, planDisclosureForPrincipal, parentLinksFor, planForDisplay, pricingForDisplay, principalOptionsFor, registerDailyReconciliation, sessionTreeOf, UsageStatsService } from "../lib/index.js";
 import { autoPlanFor, autoRatesFor, normalizeProvider } from "../lib/knowledge.js";
 
 const alice = { source: "dsh-passwords", id: "1", username: "alice", role: "user" };
@@ -496,7 +496,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.22");
+  assert.equal(packageJson.version, "0.6.23");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -803,20 +803,20 @@ test("sessionCost answers per session and never leaks another principal's", asyn
     inputTokens: input, outputTokens: output, cacheReadTokens: read, cacheWriteTokens: write, reasoningTokens: 7,
   });
   const snapshot = {
-    bySession: [
-      { sessionId: "mine", cost: 1.25, calls: 3, ...usage(300, 40, 900, 60) },
-      { sessionId: "also-mine", cost: 0.5, calls: 1, ...usage(10, 2, 0, 0) },
-    ],
+    // `bySession` is capped and this answer no longer reads it; the per-model
+    // rows are the complete set.
+    bySession: [],
     bySessionModel: [
       { sessionId: "mine", model: "deepseek-v4-flash", provider: "deepseek-official", calls: 2, cost: 1, ...usage(200, 30, 900, 60) },
       { sessionId: "mine", model: "GLM-5.3-Flash", provider: "zai", calls: 1, cost: 0.25, ...usage(100, 10, 0, 0) },
       { sessionId: "also-mine", model: "k3", provider: "kimi-coding", calls: 1, cost: 0.5, ...usage(10, 2, 0, 0) },
     ],
+    rates: { USD: 1, CNY: 7.13, source: "live" },
+    sessionParents: {},
   };
   const service = {
     currency: "CNY",
     snapshotFor: async () => snapshot,
-    getRates: async () => ({ USD: 1, CNY: 7.13, source: "live", at: 0 }),
     sessionCostForPrincipal: UsageStatsService.prototype.sessionCostForPrincipal,
   };
   const ask = (sessionId) => service.sessionCostForPrincipal.call(service, { sessionId }, alice);
@@ -824,6 +824,7 @@ test("sessionCost answers per session and never leaks another principal's", asyn
   const mine = await ask("mine");
   assert.equal(mine.cost, 1.25);
   assert.equal(mine.calls, 3);
+  assert.equal(mine.sessions, 1);
   assert.equal(mine.currency, "CNY");
   // Every model the ledger prices, not one provider's family.
   assert.deepEqual(mine.byModel.map((row) => row.model), ["deepseek-v4-flash", "GLM-5.3-Flash"]);
@@ -847,6 +848,7 @@ test("sessionCost answers per session and never leaks another principal's", asyn
   const theirs = await ask("someone-elses");
   assert.equal(theirs.cost, null);
   assert.equal(theirs.calls, 0);
+  assert.equal(theirs.sessions, 0);
   assert.deepEqual(theirs.byModel, []);
   assert.deepEqual(
     { i: theirs.inputTokens, o: theirs.outputTokens, r: theirs.cacheReadTokens, w: theirs.cacheWriteTokens },
@@ -855,6 +857,76 @@ test("sessionCost answers per session and never leaks another principal's", asyn
 
   await assert.rejects(service.sessionCostForPrincipal.call(service, { sessionId: "mine" }, undefined), /authenticated principal/);
   await assert.rejects(service.sessionCostForPrincipal.call(service, {}, alice), /sessionId required/);
+});
+
+test("sessionCost adds up the whole delegation tree, whichever session is asked about", async () => {
+  // A resumed conversation is a child of the one it continues, and the
+  // delegated workflow members hang off the ORIGINAL -- so the resumed
+  // session's own row names one model while the task spent three.
+  const usage = (input, output, read, write) => ({
+    inputTokens: input, outputTokens: output, cacheReadTokens: read, cacheWriteTokens: write,
+  });
+  const snapshot = {
+    bySession: [],
+    bySessionModel: [
+      { sessionId: "root", model: "v4.1-flash", provider: "deepseek-official", calls: 86, cost: 0.2, ...usage(209, 155, 15060, 0) },
+      { sessionId: "resumed", model: "v4.1-flash", provider: "deepseek-official", calls: 86, cost: 0.2, ...usage(209, 155, 15060, 0) },
+      { sessionId: "worker-a", model: "vision-exp", provider: "deepseek-official", calls: 400, cost: 0.3, ...usage(300, 300, 20000, 0) },
+      { sessionId: "worker-b", model: "vision-exp", provider: "deepseek-official", calls: 247, cost: 0.2, ...usage(280, 226, 17430, 0) },
+      { sessionId: "grandchild", model: "glm-5v-turbo", provider: "zai", calls: 15, cost: 0.1, ...usage(40, 3, 247, 0) },
+      { sessionId: "unrelated", model: "k3", provider: "kimi-coding", calls: 9, cost: 5, ...usage(1, 1, 1, 1) },
+    ],
+    rates: { USD: 1, CNY: 7.13, source: "live" },
+    sessionParents: { resumed: "root", "worker-a": "root", "worker-b": "root", grandchild: "worker-a" },
+  };
+  const service = {
+    currency: "USD",
+    snapshotFor: async () => snapshot,
+    sessionCostForPrincipal: UsageStatsService.prototype.sessionCostForPrincipal,
+  };
+  const ask = (sessionId) => service.sessionCostForPrincipal.call(service, { sessionId }, alice);
+
+  // The root, the resumed continuation and a worker deep in the tree all
+  // answer with the same task.
+  for (const id of ["root", "resumed", "worker-a", "grandchild"]) {
+    const answer = await ask(id);
+    assert.equal(Math.round(answer.cost * 100) / 100, 1, `${id} cost`);
+    assert.equal(answer.calls, 834, `${id} calls`);
+    assert.equal(answer.sessions, 5, `${id} sessions`);
+    // One line per model, however many sessions of the tree called it,
+    // ordered by cost.
+    assert.deepEqual(answer.byModel.map((row) => [row.model, row.calls]), [
+      ["vision-exp", 647], ["v4.1-flash", 172], ["glm-5v-turbo", 15],
+    ], `${id} split`);
+    assert.equal(answer.byModel[0].cacheReadTokens, 37430, `${id} folded usage`);
+    // A tree the caller did not ask about stays out of it.
+    assert.ok(!answer.byModel.some((row) => row.model === "k3"), `${id} isolation`);
+  }
+
+  const alone = await ask("unrelated");
+  assert.equal(alone.calls, 9);
+  assert.equal(alone.sessions, 1);
+});
+
+test("parent links name the caller's own trees and nothing else", () => {
+  const sessions = [
+    { id: "root" },
+    { id: "worker", parentSession: "root" },
+    { id: "silent-parent", parentSession: "root" },
+    { id: "grandchild", parentSession: "silent-parent" },
+    { id: "stranger-child", parentSession: "stranger-root" },
+  ];
+  // `silent-parent` itself billed nothing, so it is not visible -- but
+  // dropping its link would cut `grandchild` off from the root.
+  const links = parentLinksFor(sessions, new Set(["root", "worker", "grandchild"]));
+  assert.deepEqual(links, { worker: "root", "silent-parent": "root", grandchild: "silent-parent" });
+  assert.deepEqual(sessionTreeOf("grandchild", links), new Set(["grandchild", "root", "worker", "silent-parent"]));
+});
+
+test("a session tree survives a cyclic parent link", () => {
+  // A malformed log claiming a session is its own ancestor must terminate.
+  assert.deepEqual(sessionTreeOf("a", { a: "b", b: "a" }), new Set(["a", "b"]));
+  assert.deepEqual(sessionTreeOf("solo", {}), new Set(["solo"]));
 });
 
 test("display conversion reaches the rates inside a republished table", () => {
