@@ -30,6 +30,8 @@
 
 `foldSession` 遇到带 `inherited: true` 的 `session/end-seed` 标记就丢弃此前累积的全部样本。seeded 会话的日志开头是它所 fork 自的那个会话的逐字副本，那批调用已在源会话计过费；不切会导致同一次模型调用每被 fork 一次就多计一次。不带该标志的标记是会话给自己的 seed 收尾，不构成切点。切点取最后一个 inherited 标记，与 harness 的 persistence 契约一致（`docs/subsystems/persistence.md`）。
 
+配套：`stats.js` 导出 `FOLD_VERSION` 并盖在每条扫描缓存行上。该缓存按（size, mtime）命中且跨重启持久化，折叠规则一变而文件没变，旧行会永远命中、新规则永远跑不到历史上。改动「什么算一次样本」时必须 bump。`computeSignature` 也改读最新代文件（原先写死 `session.jsonl.zstd`，会话迁移到 v3 后签名不再随日志增长而变）。
+
 ## 7. 悬浮球可拖动（fork 独有）
 
 `useDraggableWidget`：按住药丸拖动，位置存 `localStorage['dsh-spend:position']`（`right`/`bottom` 偏移，与样式表锚点一致），窗口缩放时夹回可视区。位移不足 4px 仍算点击，照常展开面板。上游悬浮球固定在右下角。

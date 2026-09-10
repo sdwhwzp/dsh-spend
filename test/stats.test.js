@@ -5,11 +5,11 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { zstdCompressSync } from "node:zlib";
-import { buildStats, costOf, foldSession, scanSessions } from "../lib/stats.js";
+import { buildStats, computeSignature, costOf, FOLD_VERSION, foldSession, scanSessions } from "../lib/stats.js";
 
 const now = Date.now();
 const Flash = {
@@ -193,6 +193,65 @@ test("searches price against their own serving model, and an unset rate costs no
   assert.equal(costOf(call, priced, zero).costSearch, 1.5);
   assert.equal(costOf(call, priced, zero).cost, 1.5);
   assert.equal(costOf(call, unpriced, zero).costSearch, 0);
+});
+
+test("a cache entry from another fold version is re-read, not trusted", async () => {
+  // The cache is keyed by size and mtime and survives restarts, so a build
+  // that folds differently would otherwise never re-read a file that has not
+  // changed -- which is how a fix to what gets counted fails to reach history.
+  const root = await mkdtemp(join(tmpdir(), "dsh-spend-fold-"));
+  const sessionDir = join(root, "workspace", "s1");
+  const file = join(sessionDir, "session.jsonl.zstd");
+  const events = [
+    { type: "session", id: "s1", cwd: "/workspace", createdAt: 1 },
+    { type: "request/header", data: { header: { config: { provider: "deepseek", model: "deepseek-v4" } } } },
+    { type: "step/start", data: { turn: 0, step: 0 } },
+    { type: "assistant/message", data: { turn: 0, step: 0, usage: { outputTokens: 7 } } },
+  ];
+  try {
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(file, zstdCompressSync(Buffer.from(`${events.map((e) => JSON.stringify(e)).join("\n")}\n`)));
+
+    const fresh = await scanSessions(root, [], new Map());
+    assert.equal(fresh.calls[0].outputTokens, 7);
+    assert.equal(fresh.calls.length, 1);
+
+    // A row an older build left behind: right file, right size and mtime,
+    // wrong fold.
+    const { size, mtimeMs } = await stat(file);
+    const stale = new Map();
+    stale.set(file, {
+      fold: FOLD_VERSION - 1, size, mtimeMs,
+      meta: { id: "s1", cwd: "/workspace", createdAt: 1 },
+      samples: [{ sessionId: "s1", turn: 0, step: 0, outputTokens: 999, inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 }],
+    });
+    const rescanned = await scanSessions(root, [], stale);
+    assert.equal(rescanned.calls[0].outputTokens, 7, "the stale sample was discarded");
+    assert.equal(stale.get(file).fold, FOLD_VERSION, "and the entry was restamped");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("the signature watches the generation the scan actually reads", async () => {
+  // A migrated session writes `session.v3.jsonl.zstd`; a signature looking for
+  // generation 0 would stop changing as that log grows, freezing the snapshot.
+  const root = await mkdtemp(join(tmpdir(), "dsh-spend-sig-"));
+  const sessionDir = join(root, "workspace", "s1");
+  const file = join(sessionDir, "session.v3.jsonl.zstd");
+  try {
+    await mkdir(sessionDir, { recursive: true });
+    await writeFile(file, zstdCompressSync(Buffer.from("{}\n")));
+    const before = await computeSignature(root, []);
+    assert.ok(before.includes("workspace/s1"), before);
+
+    await writeFile(file, zstdCompressSync(Buffer.from("{}\n{}\n")));
+    const later = new Date(Date.now() + 2000);
+    await utimes(file, later, later);
+    assert.notEqual(await computeSignature(root, []), before);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });
 
 test("scanSessions streams zstd frames and reuses unchanged durable files", async () => {
