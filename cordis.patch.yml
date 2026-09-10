@@ -21,6 +21,20 @@
         priceVersion: '2026-09-11'
         fxVersion: 'fixed-2026-08-21'
         liveRate: true           # host refreshes a live USD→CNY quote (6h cache) when reachable
+        # 联网价格同步：默认关闭。开启后按 intervalHours 拉取公开目录，只给
+        # 「知识库和手工改价都没有覆盖到的模型」建价格行（fillUnpricedOnly），
+        # 这正是仪表盘显示「未计价」的那些。每次观测写成一个 effectiveAt=抓取时刻
+        # 的新 phase，历史一律按原 phase 计价，不重算。
+        # 想让某家完全跟着目录走，把 provider 加进 providers 白名单——但要清楚
+        # 公开目录不是厂商：它按自己的汇率折算人民币标价，也可能滞后厂商调价，
+        # 两者在 2026-09-11 对 DeepSeek 都实测到了，所以 deepseek 不建议加。
+        priceSync:
+          enabled: false
+          intervalHours: 24
+          endpoint: https://openrouter.ai/api/v1/models
+          timeoutMs: 20000
+          fillUnpricedOnly: true   # true=只补空缺；false 时仍需 providers 白名单放行
+          providers: []            # 全量同步白名单（canonical provider id）
         # pricing: [...]         # optional explicit per-model rates (overrides auto-detection)
         # plans: [...]           # optional explicit billing plans (overrides auto-detection)
         # usageEndpoints: [...]  # optional live quota/balance endpoint overrides (see README)

@@ -532,7 +532,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.27");
+  assert.equal(packageJson.version, "0.6.28");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -638,6 +638,54 @@ test("a caught render failure reaches the server log, and only for a signed-in c
   }
 });
 
+/** Two flat rate bodies for the synced-phase fixtures. */
+const RATE = { inputPerMillion: 1.2, outputPerMillion: 4, cacheReadPerMillion: 0.24, cacheWritePerMillion: 0 };
+const DEARER = { inputPerMillion: 2.4, outputPerMillion: 8, cacheReadPerMillion: 0.48, cacheWritePerMillion: 0 };
+
+test("synced prices survive a restart and sit below every hand-set rate", () => {
+  const directory = mkdtempSync(join(tmpdir(), "dsh-spend-synced-"));
+  const path = join(directory, "ledger.sqlite");
+  try {
+    const phases = [
+      { effectiveAt: "2026-09-01T00:00:00.000Z", peakHours: [], peak: RATE, offPeak: RATE },
+      { effectiveAt: "2026-09-11T00:00:00.000Z", peakHours: [], peak: DEARER, offPeak: DEARER },
+    ];
+    const first = new SpendLedger(path, { pricing: [], usdCnyRate: 7.2, priceVersion: "p1", fxVersion: "fx1" });
+    first.saveSyncedPrice({ provider: "zhipu", model: "glm-9-turbo", source: "openrouter", catalogId: "z-ai/glm-9-turbo", observedAt: 1, phases });
+    first.close?.();
+
+    const reopened = new SpendLedger(path, { pricing: [], usdCnyRate: 7.2, priceVersion: "p1", fxVersion: "fx1" });
+    const stored = reopened.syncedPrices();
+    assert.deepEqual([...stored.keys()], ["zhipu:glm-9-turbo"]);
+    assert.deepEqual(stored.get("zhipu:glm-9-turbo").phases, phases);
+
+    // A model the deployment has no table for takes the synced row; one an
+    // administrator priced by hand does not.
+    const service = {
+      pricing: [],
+      priceSync: { providers: [] },
+      ledger: {
+        pricingOverrides: () => [{ provider: "zhipu", model: "glm-5v-turbo", inputPerMillion: 9, outputPerMillion: 9, cacheReadPerMillion: 0, cacheWritePerMillion: 0, custom: true }],
+        syncedPrices: () => new Map([
+          ["zhipu:glm-9-turbo", { provider: "zhipu", model: "glm-9-turbo", phases }],
+          ["zhipu:glm-5v-turbo", { provider: "zhipu", model: "glm-5v-turbo", phases }],
+        ]),
+      },
+      pricingFor: UsageStatsService.prototype.pricingFor,
+    };
+    const rows = service.pricingFor([{ provider: "zhipu" }]);
+    const forModel = (model) => rows.filter((row) => row.model === model);
+    assert.equal(forModel("glm-9-turbo").length, 1);
+    assert.equal(forModel("glm-9-turbo")[0].synced, true);
+    // The override is the only row for the model it covers.
+    assert.deepEqual(forModel("glm-5v-turbo").map((row) => row.custom === true), [true]);
+    // A knowledge-base model keeps its verified row rather than the synced one.
+    assert.equal(forModel("glm-5.2")[0].auto, true);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("Spend exposes every alpha.1 source-mode Remote marker", async () => {
   const directory = mkdtempSync(join(tmpdir(), "dsh-spend-remote-"));
   const ctx = new Context();
@@ -656,6 +704,7 @@ test("Spend exposes every alpha.1 source-mode Remote marker", async () => {
       { method: "savePricing", invocation: { kind: "direct" } },
       { method: "deletePricing", invocation: { kind: "direct" } },
       { method: "reportRenderFailure", invocation: { kind: "direct" } },
+      { method: "syncPrices", invocation: { kind: "direct" } },
     ]);
   } finally {
     await ctx.fiber.dispose();
@@ -812,7 +861,8 @@ test("the subscription routes this deployment uses all resolve to a rate", () =>
 test("costRatesAt quotes the table the ledger would charge, in both currencies", () => {
   const service = {
     pricing: [], defaultPricing: undefined, usdCnyRate: 7.2,
-    ledger: { pricingOverrides: () => [] },
+    ledger: { pricingOverrides: () => [], syncedPrices: () => new Map() },
+    priceSync: { providers: [] },
     pricingFor: UsageStatsService.prototype.pricingFor,
   };
   const at = (iso) => UsageStatsService.prototype.costRatesAt.call(service, Date.parse(iso));

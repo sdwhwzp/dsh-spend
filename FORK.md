@@ -50,3 +50,16 @@
 
 0.6.18 的 `WidgetBoundary` 与 0.6.19 的 Remote `usageStats/reportRenderFailure`：边界捕获后把 message / stack / componentStack 写进服务端日志。上游无对应；合并上游对 `apply()` 挂载段或 Remote 名单的改动时须保留。
 
+## 8. 联网价格同步（fork 独有）
+
+`lib/price-sync.js` + ledger 的 `spend_synced_prices` 表 + `priceSync` 配置 + `syncPrices` Remote。上游没有任何联网取价能力，价格只来自随包发布的 `lib/knowledge.js` 与面板手工改价。
+
+三条约束是这个功能的全部安全性所在，合并上游时不能弱化：
+
+1. **只向前**。每次观测写成一个 `effectiveAt = 抓取时刻` 的新 phase，绝不修改既有 phase。因此 `costOf` 对每次调用仍按其自身时间戳选表，已计价的历史不改变含义，也不需要重算。
+2. **不覆盖已核过的价**。默认 `fillUnpricedOnly: true`，只给知识库和手工改价都没覆盖的模型建行——也就是仪表盘上「未计价」的那些。全量同步必须把 provider 显式列进 `providers` 白名单。
+3. **手工永远优先**。任一 `(provider, model)` 存在管理员改价，同步整体跳过它。
+
+之所以不能让目录直接当权威，有两条 2026-09-11 实测的证据：OpenRouter 把 DeepSeek 的人民币标价按自己的汇率（约 6.67）折成美元，与部署配置的 7.2 差 8%；且它对 `deepseek/deepseek-v4-pro` 仍是 2026-08-17 之前的旧表，既无 09-10 降价也无分时段。无脑覆盖会把已核对正确的表改坏。
+
+目录的 `utc_days` + `utc_start/utc_end` 窗口会映射成 `peakDays`/`peakHours`（UTC+8 → Asia/Shanghai）。只接受「两档 + 整点 + 不跨午夜 + 各窗口同一组星期」的形态；其余（例如长上下文加价那种没有时间窗的 override）一律退回平价，绝不当成高峰时段。
