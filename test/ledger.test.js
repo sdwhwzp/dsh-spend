@@ -496,7 +496,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.24");
+  assert.equal(packageJson.version, "0.6.25");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -914,13 +914,22 @@ test("parent links name the caller's own trees and nothing else", () => {
     { id: "worker", parentSession: "root" },
     { id: "silent-parent", parentSession: "root" },
     { id: "grandchild", parentSession: "silent-parent" },
+    { id: "spent-fork", parentSession: "root" },
     { id: "stranger-child", parentSession: "stranger-root" },
   ];
-  // `silent-parent` itself billed nothing, so it is not visible -- but
-  // dropping its link would cut `grandchild` off from the root.
+  // Two sessions here bill nothing: `silent-parent` only delegated, and
+  // `spent-fork` ran nothing beyond the history it inherited. Neither is
+  // visible, and dropping either would strand the sessions around it.
   const links = parentLinksFor(sessions, new Set(["root", "worker", "grandchild"]));
-  assert.deepEqual(links, { worker: "root", "silent-parent": "root", grandchild: "silent-parent" });
-  assert.deepEqual(sessionTreeOf("grandchild", links), new Set(["grandchild", "root", "worker", "silent-parent"]));
+  assert.deepEqual(links, { worker: "root", "silent-parent": "root", grandchild: "silent-parent", "spent-fork": "root" });
+  assert.deepEqual(sessionTreeOf("grandchild", links), new Set(["grandchild", "root", "worker", "silent-parent", "spent-fork"]));
+  // The fork that bills nothing still answers with its family's spend.
+  assert.deepEqual(sessionTreeOf("spent-fork", links), new Set(["spent-fork", "root", "worker", "silent-parent", "grandchild"]));
+});
+
+test("a cyclic parent chain does not hang the link scan", () => {
+  const links = parentLinksFor([{ id: "a", parentSession: "b" }, { id: "b", parentSession: "a" }], new Set(["a"]));
+  assert.deepEqual(links, { a: "b", b: "a" });
 });
 
 test("a session tree survives a cyclic parent link", () => {
