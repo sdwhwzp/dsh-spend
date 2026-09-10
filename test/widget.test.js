@@ -107,10 +107,17 @@ function makeMiniReact() {
   return { react, jsxRuntime, domClient, settle, hosts, caught };
 }
 
-async function mountWidget(snapshot) {
+async function mountWidget(snapshot, options = {}) {
   const mini = makeMiniReact();
   let registration;
+  // A browser-shaped storage the test can read back, seeded per case.
+  const stored = new Map(Object.entries(options.storage ?? {}));
+  const listeners = new Map();
   runInNewContext(readFileSync(new URL("../lib/client.js", import.meta.url), "utf8"), {
+    addEventListener: (type, fn) => listeners.set(type, fn),
+    removeEventListener: (type) => listeners.delete(type),
+    innerWidth: 1440,
+    innerHeight: 900,
     clearInterval: () => {},
     clearTimeout: () => {},
     console: { ...console, error: () => {} },
@@ -124,7 +131,10 @@ async function mountWidget(snapshot) {
     },
     HTMLElement: class {},
     MutationObserver: class { observe() {} disconnect() {} },
-    localStorage: { getItem: () => null, setItem: () => {} },
+    localStorage: {
+      getItem: (key) => stored.get(key) ?? null,
+      setItem: (key, value) => { stored.set(key, String(value)); },
+    },
     setInterval: () => 1,
     setTimeout: () => 1,
     window: { __ModuleLoader__: { load: (value) => { registration = value; } }, addEventListener: () => {}, removeEventListener: () => {} },
@@ -165,7 +175,11 @@ async function mountWidget(snapshot) {
   return {
     ...mini,
     reports,
+    stored,
+    listeners,
     hostByClass: (className) => mini.hosts.find((h) => h.props.className === className),
+    // The root gains `dsu-dragging` mid-gesture, so it is found by its first class.
+    widgetRoot: () => mini.hosts.find((h) => String(h.props.className ?? "").split(" ")[0] === "dsu-widget"),
     hostByKey: (key) => mini.hosts.find((h) => h.props.key === key),
     dispose: async () => { await fiber.dispose(); await session.dispose(); },
   };
@@ -217,6 +231,120 @@ test("a render failure is kept inside the widget and reported to the server", as
     assert.equal(widget.reports[0].message, "windows unreadable");
     assert.match(widget.reports[0].componentStack, /PlansSection/);
     assert.ok(widget.hostByClass("dsu-popTitle"), "the boundary's own panel replaced the widget");
+  } finally {
+    await widget.dispose();
+  }
+});
+
+/** A pointer event as the pill's handlers read one, with a capture-capable target. */
+function pointer(x, y, pointerId = 1) {
+  const captured = [];
+  return {
+    button: 0,
+    pointerId,
+    clientX: x,
+    clientY: y,
+    captured,
+    defaultPrevented: false,
+    preventDefault() { this.defaultPrevented = true; },
+    stopPropagation() {},
+    currentTarget: {
+      setPointerCapture: (id) => captured.push(["set", id]),
+      releasePointerCapture: (id) => captured.push(["release", id]),
+    },
+  };
+}
+
+test("the widget can be dragged off its corner and stays where it is put", async () => {
+  const widget = await mountWidget(codePlanWithoutLivePayload);
+  try {
+    const pill = widget.hostByClass("dsu-pill");
+    assert.deepEqual({ ...widget.widgetRoot().props.style }, { right: "20px", bottom: "20px" });
+
+    // Drag up and to the left: pointer travel toward the top-left GROWS the
+    // right/bottom offsets the widget is anchored by.
+    pill.props.onPointerDown(pointer(1000, 800));
+    pill.props.onPointerMove(pointer(960, 770));
+    await widget.settle();
+    const root = widget.widgetRoot();
+    assert.deepEqual({ ...root.props.style }, { right: "60px", bottom: "50px" });
+    assert.ok(root.props.className.includes("dsu-dragging"), "the drag is visible while it lasts");
+
+    const release = pointer(960, 770);
+    pill.props.onPointerUp(release);
+    await widget.settle();
+    assert.deepEqual(release.captured, [["release", 1]]);
+    // The corner survives a reload.
+    assert.equal(widget.stored.get("dsh-spend:position"), JSON.stringify({ right: 60, bottom: 50 }));
+  } finally {
+    await widget.dispose();
+  }
+});
+
+test("a remembered corner is restored, and one off screen is pulled back", async () => {
+  const placed = await mountWidget(codePlanWithoutLivePayload, {
+    storage: { "dsh-spend:position": JSON.stringify({ right: 300, bottom: 120 }) },
+  });
+  try {
+    assert.deepEqual({ ...placed.widgetRoot().props.style }, { right: "300px", bottom: "120px" });
+  } finally {
+    await placed.dispose();
+  }
+
+  // A corner further out than the window is wide would leave the widget
+  // unreachable; the window is 1440x900 in this harness.
+  const escaped = await mountWidget(codePlanWithoutLivePayload, {
+    storage: { "dsh-spend:position": JSON.stringify({ right: 9000, bottom: -50 }) },
+  });
+  try {
+    assert.deepEqual({ ...escaped.widgetRoot().props.style }, { right: "1432px", bottom: "8px" });
+  } finally {
+    await escaped.dispose();
+  }
+
+  // A value written by something else never breaks the mount.
+  const junk = await mountWidget(codePlanWithoutLivePayload, { storage: { "dsh-spend:position": "not json" } });
+  try {
+    assert.deepEqual({ ...junk.widgetRoot().props.style }, { right: "20px", bottom: "20px" });
+  } finally {
+    await junk.dispose();
+  }
+});
+
+test("a press that does not travel still opens the dashboard", async () => {
+  const widget = await mountWidget(codePlanWithoutLivePayload);
+  try {
+    const pill = widget.hostByClass("dsu-pill");
+    pill.props.onPointerDown(pointer(1000, 800));
+    // Two pixels of hand tremor is not a drag.
+    pill.props.onPointerMove(pointer(1001, 801));
+    pill.props.onPointerUp(pointer(1001, 801));
+    await widget.settle();
+    assert.deepEqual({ ...widget.widgetRoot().props.style }, { right: "20px", bottom: "20px" });
+    assert.equal(widget.stored.has("dsh-spend:position"), false, "an unmoved widget stores nothing");
+
+    const click = pointer(1001, 801);
+    pill.props.onClickCapture(click);
+    assert.equal(click.defaultPrevented, false, "the click is not swallowed");
+    pill.props.onClick();
+    await widget.settle();
+    assert.ok(widget.hostByKey("plan-code-kimi-coding"), "the dashboard opened");
+  } finally {
+    await widget.dispose();
+  }
+});
+
+test("a drag does not also open the dashboard", async () => {
+  const widget = await mountWidget(codePlanWithoutLivePayload);
+  try {
+    const pill = widget.hostByClass("dsu-pill");
+    pill.props.onPointerDown(pointer(1000, 800));
+    pill.props.onPointerMove(pointer(900, 700));
+    await widget.settle();
+    const click = widget.hostByClass("dsu-pill").props.onClickCapture;
+    const event = pointer(900, 700);
+    click(event);
+    assert.equal(event.defaultPrevented, true, "the drag's click is swallowed");
   } finally {
     await widget.dispose();
   }

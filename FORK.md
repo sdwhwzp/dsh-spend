@@ -26,6 +26,14 @@
 
 该接口按**会话族**聚合，不是单行：工作流成员、子代理与被续接的会话各自带 `parentSession` 单独记账，只读 `sessionId` 那一行会漏掉整棵树的开销与模型。快照因此新增 `sessionParents`（仅限调用者自己可见的树），聚合走未截断的 `bySessionModel`（`bySession` 受 `maxSessions` 截断），返回值多一个 `sessions` 说明合并了几个会话。
 
+## 6. fork 继承段不重复计费（fork 独有）
+
+`foldSession` 遇到带 `inherited: true` 的 `session/end-seed` 标记就丢弃此前累积的全部样本。seeded 会话的日志开头是它所 fork 自的那个会话的逐字副本，那批调用已在源会话计过费；不切会导致同一次模型调用每被 fork 一次就多计一次。不带该标志的标记是会话给自己的 seed 收尾，不构成切点。切点取最后一个 inherited 标记，与 harness 的 persistence 契约一致（`docs/subsystems/persistence.md`）。
+
+## 7. 悬浮球可拖动（fork 独有）
+
+`useDraggableWidget`：按住药丸拖动，位置存 `localStorage['dsh-spend:position']`（`right`/`bottom` 偏移，与样式表锚点一致），窗口缩放时夹回可视区。位移不足 4px 仍算点击，照常展开面板。上游悬浮球固定在右下角。
+
 ## 4. PlansSection 的实时用量行：本分支已修复的上游缺陷
 
 **上游做法**（`e3534f1`，2026-08-25，订阅商实时额度）：code 型计划卡里 `liveBody`（读 `providerUsage.fetchedAt`）与 `liveErrorNote`（读 `providerUsage.error`）在渲染时急切构造，消费处才按 `showLive` / `liveFailed` 门控。

@@ -114,6 +114,63 @@ test("counts auxiliary search dispatches on the step whose tool loop issued them
   assert.equal(call.searchModel, "deepseek-v4-flash");
 });
 
+/** One priced step of a conversation, as a session log records it. */
+const step = (turn, step, time) => [
+  { type: "turn/start", time, data: { turn } },
+  { type: "step/start", time: time + 1, data: { turn, step } },
+  { type: "assistant/message", time: time + 2, data: { turn, step, usage: { inputTokens: 10, outputTokens: 5 }, message: {} } },
+];
+
+test("a fork's inherited history is not billed again", () => {
+  // A seeded session opens with a verbatim copy of what it was forked from,
+  // closed by an `inherited` end-seed marker. Those calls already billed to
+  // the session they were copied from.
+  const forked = foldSession([
+    ...step(1, 1, 10),
+    ...step(1, 2, 20),
+    { type: "session/end-seed", time: 30, data: { inherited: true } },
+    ...step(2, 1, 40),
+  ], { id: "fork", cwd: "/w", createdAt: 0 });
+  assert.deepEqual(forked.map((call) => [call.turn, call.step]), [[2, 1]]);
+
+  // A fork that has run nothing of its own bills nothing at all -- the case
+  // that doubled a conversation's cost every time it was forked.
+  const untouched = foldSession([
+    ...step(1, 1, 10),
+    { type: "session/end-seed", time: 30, data: { inherited: true } },
+  ], { id: "fork", cwd: "/w", createdAt: 0 });
+  assert.deepEqual(untouched, []);
+});
+
+test("a session's own end-seed marker cuts nothing", () => {
+  // The marker a session writes to close its OWN seed carries no `inherited`
+  // flag; treating it as a cut would erase the session's real spend.
+  const events = [...step(1, 1, 10), { type: "session/end-seed", time: 20, data: {} }, ...step(2, 1, 30)];
+  assert.deepEqual(
+    foldSession(events, { id: "s1", cwd: "/w", createdAt: 0 }).map((call) => [call.turn, call.step]),
+    [[1, 1], [2, 1]],
+  );
+  // Same for a marker with no data at all.
+  const bare = [...step(1, 1, 10), { type: "session/end-seed", time: 20 }];
+  assert.equal(foldSession(bare, { id: "s1", cwd: "/w", createdAt: 0 }).length, 1);
+});
+
+test("the cut is the LAST inherited marker", () => {
+  // A fork of a fork carries more than one inherited marker; everything up to
+  // the last one belongs to an ancestor.
+  const events = [
+    ...step(1, 1, 10),
+    { type: "session/end-seed", time: 20, data: { inherited: true } },
+    ...step(2, 1, 30),
+    { type: "session/end-seed", time: 40, data: { inherited: true } },
+    ...step(3, 1, 50),
+  ];
+  assert.deepEqual(
+    foldSession(events, { id: "s1", cwd: "/w", createdAt: 0 }).map((call) => [call.turn, call.step]),
+    [[3, 1]],
+  );
+});
+
 test("a step with no auxiliary search carries no search fields", () => {
   const [call] = foldSession([
     { type: "turn/start", time: 1, data: { turn: 1 } },
