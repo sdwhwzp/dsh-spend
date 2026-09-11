@@ -63,3 +63,11 @@
 之所以不能让目录直接当权威，有两条 2026-09-11 实测的证据：OpenRouter 把 DeepSeek 的人民币标价按自己的汇率（约 6.67）折成美元，与部署配置的 7.2 差 8%；且它对 `deepseek/deepseek-v4-pro` 仍是 2026-08-17 之前的旧表，既无 09-10 降价也无分时段。无脑覆盖会把已核对正确的表改坏。
 
 目录的 `utc_days` + `utc_start/utc_end` 窗口会映射成 `peakDays`/`peakHours`（UTC+8 → Asia/Shanghai）。只接受「两档 + 整点 + 不跨午夜 + 各窗口同一组星期」的形态；其余（例如长上下文加价那种没有时间窗的 override）一律退回平价，绝不当成高峰时段。
+
+## 9. 未定价模型禁用闸（fork 独有）
+
+`requirePricedModel` + `UsageStatsService.unpricedRefusal`。上游只观测不干预；本部署要求「不可计费即不可调用」，所以 dsh-spend 在 `llm/stream` waterfall 上 `prepend` 一个 listener，解析不到价格行就抛出，请求不发出。
+
+判定刻意与报表同源（`pricingFor` + `resolvePrice`，与 `defaultPricing` 做引用相等判断），这样「可调用」与「可计费」是同一个条件，不会出现两套口径。豁免走 `allowModels`，接受 `model` 或 `provider/model`。
+
+合并上游时：上游若改动 `pricingFor` 的返回或 `resolvePrice` 的兜底语义，必须同步检查这里的引用相等判断仍然成立。

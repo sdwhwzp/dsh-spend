@@ -104,6 +104,20 @@
 
 插件内置**供应商知识库**（`lib/knowledge.js`，2026-08-27 官方文档核实）：**17 个供应商 / 159 个模型价格**。provider id 自动归一化别名：`glm`→zhipu、`kimi`→moonshot、`dashscope`→qwen、`gemini`→google、`grok`→xai、`claude`→anthropic、`copilot`→github-copilot、`minimax-cn`→minimax、`deepseek-official`→deepseek 等。日志中出现的提供商**自动匹配**知识库生成计划与价格（UI 标记"自动识别"）；显式 `plans` / `pricing` 配置始终覆盖自动识别。
 
+### 未定价模型禁用闸（默认关闭）
+
+没有价格行的模型会落到默认单价——一个没人选过的数字，花的是真钱，事后任何报表都无法归因。开启 `requirePricedModel` 后，这类模型在**请求发出之前**被拒绝：
+
+```yaml
+requirePricedModel:
+  enabled: true
+  allowModels: []        # 豁免：写 `model` 或 `provider/model`
+```
+
+闸门挂在 `llm/stream` waterfall 上并 `prepend`，跑在重试与路由之前，抛出即终止本次调用，不会先流出半个响应。判定与报表**同源**——管理员改价、知识库行、同步行，任一命中即放行，所以「可调用」等价于「可计费」。同步补上价格后，该模型自动解禁，无需重启。
+
+本地或确实免费的路由放进 `allowModels`。
+
 ### 联网价格同步（默认关闭）
 
 知识库是**随包发布的静态快照**，两件事它做不到：厂商调价后到下次发版之间它是旧的；发版之后才出现的新模型它根本没有——那种模型会落到默认单价，仪表盘标记为「未计价」。开启 `priceSync` 后，插件按 `intervalHours` 拉取公开模型目录（默认 OpenRouter），补上这个缺口。

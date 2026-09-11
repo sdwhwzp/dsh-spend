@@ -16,6 +16,7 @@ import {
   windowsOf,
 } from "../lib/price-sync.js";
 import { resolvePrice } from "../lib/stats.js";
+import { UsageStatsService } from "../lib/index.js";
 
 /** The DeepSeek Flash entry as the catalog publishes it: weekday peak windows in UTC. */
 const FLASH_ENTRY = {
@@ -208,4 +209,53 @@ test("a refusing or malformed catalog fails loudly rather than writing nothing q
   );
   const data = await fetchCatalog(async () => ({ ok: true, json: async () => ({ data: [FLAT_ENTRY] }) }), "https://example.invalid", 1000);
   assert.equal(data.length, 1);
+});
+
+/** A service shaped like the real one, with only what the gate reads. */
+function gateService({ overrides = [], synced = new Map(), allowModels = [], defaultPricing = DEFAULT_ROW } = {}) {
+  return {
+    pricing: [],
+    defaultPricing,
+    priceSync: { providers: [] },
+    requirePricedModel: { enabled: true, allowModels: new Set(allowModels.map((m) => m.toLowerCase())) },
+    ledger: { pricingOverrides: () => overrides, syncedPrices: () => synced },
+    pricingFor: UsageStatsService.prototype.pricingFor,
+    unpricedRefusal: UsageStatsService.prototype.unpricedRefusal,
+  };
+}
+
+const DEFAULT_ROW = { inputPerMillion: 0.14, outputPerMillion: 0.28, cacheReadPerMillion: 0.0028, cacheWritePerMillion: 0 };
+
+test("an unpriced model is refused, a priced one is not", () => {
+  const service = gateService();
+  // The knowledge base prices this one.
+  assert.equal(service.unpricedRefusal("deepseek", "deepseek-v4-pro"), undefined);
+  // Nothing prices this one, so it would bill at the default row.
+  assert.match(service.unpricedRefusal("deepseek", "deepseek-unreleased"), /没有定价/);
+  assert.match(service.unpricedRefusal("deepseek", "deepseek-unreleased"), /deepseek-unreleased/);
+});
+
+test("every way a model can get a price makes it callable", () => {
+  const override = [{ provider: "local", model: "house-model", inputPerMillion: 0, outputPerMillion: 0, cacheReadPerMillion: 0, cacheWritePerMillion: 0, custom: true }];
+  assert.equal(gateService({ overrides: override }).unpricedRefusal("local", "house-model"), undefined);
+
+  const phases = [{ effectiveAt: "2026-09-01T00:00:00.000Z", peakHours: [], peak: DEFAULT_ROW, offPeak: DEFAULT_ROW }];
+  const synced = new Map([["zhipu:glm-9-turbo", { provider: "zhipu", model: "glm-9-turbo", phases }]]);
+  assert.equal(gateService({ synced }).unpricedRefusal("zhipu", "glm-9-turbo"), undefined);
+});
+
+test("an explicit exemption covers a genuinely free route", () => {
+  // A bare model id exempts it on every route; `provider/model` exempts one.
+  assert.equal(gateService({ allowModels: ["qwen3.8-27b-q4"] }).unpricedRefusal("mac-qwen", "qwen3.8-27b-q4"), undefined);
+  assert.equal(gateService({ allowModels: ["mac-qwen/qwen3.8-27b-q4"] }).unpricedRefusal("mac-qwen", "qwen3.8-27b-q4"), undefined);
+  // The exemption is exact: another route's model stays refused.
+  assert.match(gateService({ allowModels: ["mac-qwen/qwen3.8-27b-q4"] }).unpricedRefusal("other", "qwen3.8-27b-q4"), /没有定价/);
+});
+
+test("a synced price that arrives later unblocks the model it prices", () => {
+  const phases = [{ effectiveAt: "2026-09-01T00:00:00.000Z", peakHours: [], peak: DEFAULT_ROW, offPeak: DEFAULT_ROW }];
+  const before = gateService();
+  assert.match(before.unpricedRefusal("zhipu", "glm-9-turbo"), /没有定价/);
+  const after = gateService({ synced: new Map([["zhipu:glm-9-turbo", { provider: "zhipu", model: "glm-9-turbo", phases }]]) });
+  assert.equal(after.unpricedRefusal("zhipu", "glm-9-turbo"), undefined);
 });

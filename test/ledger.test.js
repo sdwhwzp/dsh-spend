@@ -532,7 +532,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.28");
+  assert.equal(packageJson.version, "0.6.29");
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -1035,4 +1035,59 @@ test("display conversion reaches the rates inside a republished table", () => {
   assert.equal(scaled.schedule.phases[0].peak.inputPerMillion, 28.8);
   assert.equal(scaled.schedule.phases[0].offPeak.inputPerMillion, 14.4);
   assert.equal(scaled.schedule.phases[0].effectiveAt, "2026-01-01T00:00:00+08:00");
+});
+
+test("with the gate on, an unpriced model is refused before the adapter is reached", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "dsh-spend-gate-"));
+  const ctx = new Context();
+  try {
+    const service = new UsageStatsService(ctx, {
+      ledgerPath: join(directory, "ledger.sqlite"),
+      liveRate: false,
+      requirePricedModel: { enabled: true, allowModels: ["mac-qwen/qwen3.8-27b-q4"] },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    let reached = 0;
+    const call = (provider, model) => ctx.waterfall(
+      service,
+      "llm/stream",
+      { provider, model, messages: [] },
+      () => { reached += 1; return "adapter"; },
+    );
+
+    // The knowledge base prices this one, so the call reaches the adapter.
+    assert.equal(await call("deepseek-official", "deepseek-v4-pro"), "adapter");
+    assert.equal(reached, 1);
+    // The exemption covers a route that is genuinely free.
+    assert.equal(await call("mac-qwen", "qwen3.8-27b-q4"), "adapter");
+    assert.equal(reached, 2);
+    // Nothing prices this one: the adapter is never reached. The gate throws
+    // out of the waterfall synchronously, so the refusal is caught directly
+    // rather than awaited.
+    let refusal;
+    try {
+      await call("deepseek-official", "deepseek-unreleased");
+    } catch (error) {
+      refusal = error;
+    }
+    assert.match(String(refusal?.message ?? refusal), /没有定价/);
+    assert.equal(reached, 2, "the refused call never reached the adapter");
+  } finally {
+    await ctx.stop?.();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("with the gate off, an unpriced model still reaches the adapter", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "dsh-spend-gate-off-"));
+  const ctx = new Context();
+  try {
+    const service = new UsageStatsService(ctx, { ledgerPath: join(directory, "ledger.sqlite"), liveRate: false });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const result = await ctx.waterfall(service, "llm/stream", { provider: "deepseek-official", model: "deepseek-unreleased", messages: [] }, () => "adapter");
+    assert.equal(result, "adapter", "the gate is off by default");
+  } finally {
+    await ctx.stop?.();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });

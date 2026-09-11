@@ -21,6 +21,14 @@
         priceVersion: '2026-09-11'
         fxVersion: 'fixed-2026-08-21'
         liveRate: true           # host refreshes a live USD→CNY quote (6h cache) when reachable
+        # 未定价模型禁用闸：默认关闭。开启后在 llm/stream waterfall 上拦截，
+        # 任何解析不到价格行（会落到 defaultPricing）的模型在请求发出前被拒绝，
+        # 而不是先花钱再在报表里显示「未计价」。判定与报表同源：管理员改价、
+        # 知识库、同步行任一命中即放行。
+        # allowModels 为豁免名单，写 `model` 或 `provider/model`，用于本地/免费路由。
+        requirePricedModel:
+          enabled: false
+          allowModels: []
         # 联网价格同步：默认关闭。开启后按 intervalHours 拉取公开目录，只给
         # 「知识库和手工改价都没有覆盖到的模型」建价格行（fillUnpricedOnly），
         # 这正是仪表盘显示「未计价」的那些。每次观测写成一个 effectiveAt=抓取时刻
