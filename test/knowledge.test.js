@@ -100,3 +100,33 @@ test("OpenCode Go: the fallback plan row states the per-model caveat and carries
   assert.match(quota.note, /\$15\/\$30\/\$60/u);
   assert.equal(PROVIDER_KNOWLEDGE["opencode-go"].plan.subscription.amount, 10);
 });
+
+test("OpenCode Go: every plan model carries a token rate, so nothing shows as unpriced", () => {
+  const priced = new Map(PROVIDER_KNOWLEDGE["opencode-go"].rates.map(rate => [rate.model, rate]));
+  const missing = Object.keys(OPENCODE_GO_MODELS).filter(id => !priced.has(id));
+  assert.deepEqual(missing, [], "plan models without a rate row");
+  // The models the dashboard reported as 未计价 on 2026-09-14.
+  for (const id of ["qwen3.8-flash", "deepseek-v4-flash", "glm-5.3-flash", "hy4-preview",
+    "kimi-k2.7-code", "mimo-v2.5-pro", "qwen3.8-max", "grok-4.6"]) {
+    assert.ok(priced.has(id), `${id} is priced`);
+  }
+  for (const [id, rate] of priced) {
+    for (const field of ["inputPerMillion", "outputPerMillion", "cacheReadPerMillion", "cacheWritePerMillion"]) {
+      assert.equal(typeof rate[field], "number", `${id}.${field} is a number`);
+      assert.ok(rate[field] >= 0, `${id}.${field} is not negative`);
+    }
+    assert.ok(rate.outputPerMillion >= rate.inputPerMillion, `${id} output is not cheaper than input`);
+  }
+});
+
+test("OpenCode Go: rates come from the plan's own catalog, not the Zen pay-as-you-go card", () => {
+  const rateOf = model => PROVIDER_KNOWLEDGE["opencode-go"].rates.find(rate => rate.model === model);
+  // Pins the source: the dashboard already renders luna as ¥1.44 / ¥8.64 /
+  // ¥0.144 / ¥1.80 at 7.2 CNY/USD, which is this row and not the Zen card.
+  assert.deepEqual(rateOf("gpt-5.6-luna"), {
+    model: "gpt-5.6-luna", inputPerMillion: 0.2, outputPerMillion: 1.2, cacheReadPerMillion: 0.02, cacheWritePerMillion: 0.25,
+  });
+  // Zen sells the same model at $1.74/$3.48; the Go plan charges $0.66/$1.98.
+  assert.equal(rateOf("deepseek-v4-pro").inputPerMillion, 0.66);
+  assert.equal(rateOf("deepseek-v4-pro").outputPerMillion, 1.98);
+});
