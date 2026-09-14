@@ -5,7 +5,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { discoverPlans, normalizeProvider, PROVIDER_ALIASES } from "../lib/knowledge.js";
+import { discoverPlans, normalizeProvider, opencodeGoCaps, OPENCODE_GO_MODELS, PROVIDER_ALIASES, PROVIDER_KNOWLEDGE } from "../lib/knowledge.js";
 
 test("normalizeProvider maps every declared alias to its canonical id", () => {
   for (const [alias, canonical] of Object.entries(PROVIDER_ALIASES)) {
@@ -69,4 +69,34 @@ test("discoverPlans: minimax-cn logs yield one MiniMax CODE plan (live quota, no
 test("discoverPlans: minimax-cn is deduped against an explicit minimax plan", () => {
   const { autoPlans } = discoverPlans(["minimax-cn", "minimax"], [{ provider: "minimax", type: "code" }]);
   assert.equal(autoPlans.length, 0);
+});
+test("OpenCode Go: per-model caps use the published tiers and window shares", () => {
+  const tiers = new Set(Object.values(OPENCODE_GO_MODELS).map(entry => entry.dollarsPerMonth));
+  assert.deepEqual([...tiers].sort((a, b) => a - b), [15, 30, 60], "published monthly tiers");
+  for (const [id, entry] of Object.entries(OPENCODE_GO_MODELS)) {
+    assert.match(id, /^[a-z0-9][a-z0-9.-]*$/u, `${id} is a log-shaped model id`);
+    assert.ok(entry.label.length > 0, `${id} has a label`);
+    const { per5h, perWeek, perMonth } = entry.requests;
+    assert.ok(per5h > 0 && perWeek >= per5h && perMonth >= perWeek, `${id} request estimates ascend`);
+  }
+});
+
+test("OpenCode Go: caps follow the model, and an unknown model gets the top tier", () => {
+  assert.deepEqual(opencodeGoCaps("deepseek-v4-pro"), { dollarsPer5h: 3, dollarsPerWeek: 7.5, dollarsPerMonth: 15 });
+  assert.deepEqual(opencodeGoCaps("deepseek-v4-flash"), { dollarsPer5h: 6, dollarsPerWeek: 15, dollarsPerMonth: 30 });
+  assert.deepEqual(opencodeGoCaps("GLM-5.3-Flash"), { dollarsPer5h: 12, dollarsPerWeek: 30, dollarsPerMonth: 60 });
+  assert.deepEqual(opencodeGoCaps("not-on-this-plan"), { dollarsPer5h: 12, dollarsPerWeek: 30, dollarsPerMonth: 60 });
+  assert.deepEqual(opencodeGoCaps(), { dollarsPer5h: 12, dollarsPerWeek: 30, dollarsPerMonth: 60 });
+});
+
+test("OpenCode Go: the fallback plan row states the per-model caveat and carries no request count", () => {
+  const quota = PROVIDER_KNOWLEDGE["opencode-go"].plan.quota;
+  assert.deepEqual(
+    { dollarsPer5h: quota.dollarsPer5h, dollarsPerWeek: quota.dollarsPerWeek, dollarsPerMonth: quota.dollarsPerMonth },
+    opencodeGoCaps(),
+  );
+  // The retired row claimed 79,050 requests a week for every model on the plan.
+  assert.equal(quota.requestsPerWeek, undefined);
+  assert.match(quota.note, /\$15\/\$30\/\$60/u);
+  assert.equal(PROVIDER_KNOWLEDGE["opencode-go"].plan.subscription.amount, 10);
 });
