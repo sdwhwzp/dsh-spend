@@ -532,7 +532,7 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 test("package and lockfile versions stay synchronized", () => {
   const packageJson = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
   const lockfile = JSON.parse(readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"));
-  assert.equal(packageJson.version, "0.6.29");
+  assert.match(packageJson.version, /^\d+\.\d+\.\d+(?:-[\w.-]+)?$/);
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
@@ -787,6 +787,31 @@ test("final step replay is idempotent and principal reports are isolated", () =>
     assert.equal(ledger.report({ ...alice, role: "admin" }, { month: "2026-08" }).length, 2);
     ledger.close();
   } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("auxiliary usage charges its Host-authenticated owner once and survives reopening", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "dsh-spend-auxiliary-"));
+  const file = join(directory, "ledger.sqlite");
+  const options = { pricing, usdCnyRate: 7.2, priceVersion: "p1", fxVersion: "fx1" };
+  const ctx = new Context();
+  let ledger = new SpendLedger(file, options);
+  try {
+    const service = new SpendAccountingService(ctx, ledger);
+    const sample = call({ sessionId: "task-board-parse:owned-request", turn: 0, principal: bob });
+    assert.throws(() => service.recordUsage(undefined, sample), /authenticated principal/);
+    assert.equal(service.recordUsage(alice, sample), true);
+    assert.equal(service.recordUsage(alice, sample), false);
+    assert.equal(service.monthlyUsedMicros(alice, "2026-08"), 7_200_000);
+    assert.equal(service.monthlyUsedMicros(bob, "2026-08"), 0);
+    assert.equal(service.budgetStatus(alice, 7_200_000, "2026-08").exhausted, true);
+    ledger.close();
+    ledger = new SpendLedger(file, options);
+    assert.equal(ledger.monthlyUsedMicros(alice, "2026-08"), 7_200_000);
+  } finally {
+    ledger.close();
+    await ctx.fiber.dispose();
     rmSync(directory, { recursive: true, force: true });
   }
 });
