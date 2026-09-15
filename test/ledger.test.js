@@ -468,6 +468,13 @@ test("browser client resolves the mounted usageStats namespace through an exact 
 
     async $mount(contribution) {
       assert.equal(contribution.package, "dsh-spend");
+      for (const descriptor of contribution.descriptors) {
+        for (const codec of [descriptor.result, ...descriptor.parameters.map(parameter => parameter.codec)]) {
+          assert.equal(typeof codec.create, "function");
+          assert.throws(() => codec.create().parse(undefined));
+          assert.throws(() => codec.create().parse(Infinity));
+        }
+      }
       mounted = true;
       const child = this.ctx.plugin({
         name: "remote.usageStats",
