@@ -296,3 +296,6 @@ dsh-spend/
 ## License
 
 [MIT](LICENSE)
+## Harness 0.2 deployment
+
+This fork accepts Harness `0.2.0-rc.1` in addition to its existing runtime peer ranges. Deploy all Harness peers from one runtime release; account authorization, settings persistence, and browser/desktop behavior remain owned by the existing integrations.

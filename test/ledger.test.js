@@ -543,8 +543,8 @@ test("package and lockfile versions stay synchronized", () => {
   assert.equal(lockfile.version, packageJson.version);
   assert.equal(lockfile.packages[""].version, packageJson.version);
   assert.equal(packageJson.peerDependencies["@deepseek-ai/cordis"], "^4.0.2");
-  assert.equal(packageJson.peerDependencies["@deepseek-ai/dsh-api-remotes"], "^0.1.3-alpha.1");
-  assert.equal(packageJson.peerDependencies["@deepseek-ai/dsh-api-session-controller"], "^0.1.3-alpha.1");
+  assert.equal(packageJson.peerDependencies["@deepseek-ai/dsh-api-remotes"], "^0.1.3-alpha.1 || ^0.2.0-rc.1");
+  assert.equal(packageJson.peerDependencies["@deepseek-ai/dsh-api-session-controller"], "^0.1.3-alpha.1 || ^0.2.0-rc.1");
 });
 
 test("Remote entrypoints use the Gateway principal and reject anonymous or child mutations", async () => {
