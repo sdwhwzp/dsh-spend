@@ -15,6 +15,18 @@ const alice = { source: "dsh-passwords", id: "1", username: "alice", role: "user
 const bob = { source: "dsh-passwords", id: "2", username: "bob", role: "user" };
 const pricing = [{ model: "exact", inputPerMillion: 1, outputPerMillion: 2, cacheReadPerMillion: 0.1, cacheWritePerMillion: 1.25 }];
 
+function usageService(ctx, directory, config) {
+  ctx.provide("sessions", { list: () => [] });
+  const previousDshHome = process.env.DSH_HOME;
+  process.env.DSH_HOME = directory;
+  try {
+    return new UsageStatsService(ctx, config);
+  } finally {
+    if (previousDshHome === undefined) delete process.env.DSH_HOME;
+    else process.env.DSH_HOME = previousDshHome;
+  }
+}
+
 function call(overrides = {}) {
   return {
     sessionId: "shared", turn: 1, step: 0, final: true, principal: alice,
@@ -388,12 +400,12 @@ test("daily reconciliation repeats every 24 hours and disposes with the plugin",
   };
   registerDailyReconciliation(ctx, { reconcile: async () => { reconcileCount++; } }, 24, timers);
   await Promise.resolve();
-  assert.equal(reconcileCount, 0);
+  assert.equal(reconcileCount, 1);
   assert.equal(intervalMs, 24 * 60 * 60 * 1_000);
   assert.equal(unrefCount, 1);
   intervalCallback();
   await Promise.resolve();
-  assert.equal(reconcileCount, 1);
+  assert.equal(reconcileCount, 2);
   disposer();
   assert.equal(cleared, true);
 });
@@ -697,7 +709,7 @@ test("Spend exposes every alpha.1 source-mode Remote marker", async () => {
   const directory = mkdtempSync(join(tmpdir(), "dsh-spend-remote-"));
   const ctx = new Context();
   try {
-    const service = new UsageStatsService(ctx, {
+    const service = usageService(ctx, directory, {
       ledgerPath: join(directory, "ledger.sqlite"),
       liveRate: false,
     });
@@ -1073,7 +1085,7 @@ test("with the gate on, an unpriced model is refused before the adapter is reach
   const directory = mkdtempSync(join(tmpdir(), "dsh-spend-gate-"));
   const ctx = new Context();
   try {
-    const service = new UsageStatsService(ctx, {
+    const service = usageService(ctx, directory, {
       ledgerPath: join(directory, "ledger.sqlite"),
       liveRate: false,
       requirePricedModel: { enabled: true, allowModels: ["mac-qwen/qwen3.8-27b-q4"] },
@@ -1105,7 +1117,7 @@ test("with the gate on, an unpriced model is refused before the adapter is reach
     assert.match(String(refusal?.message ?? refusal), /没有定价/);
     assert.equal(reached, 2, "the refused call never reached the adapter");
   } finally {
-    await ctx.stop?.();
+    await ctx.fiber.dispose();
     rmSync(directory, { recursive: true, force: true });
   }
 });
@@ -1114,12 +1126,12 @@ test("with the gate off, an unpriced model still reaches the adapter", async () 
   const directory = mkdtempSync(join(tmpdir(), "dsh-spend-gate-off-"));
   const ctx = new Context();
   try {
-    const service = new UsageStatsService(ctx, { ledgerPath: join(directory, "ledger.sqlite"), liveRate: false });
+    const service = usageService(ctx, directory, { ledgerPath: join(directory, "ledger.sqlite"), liveRate: false });
     await new Promise((resolve) => setTimeout(resolve, 20));
     const result = await ctx.waterfall(service, "llm/stream", { provider: "deepseek-official", model: "deepseek-unreleased", messages: [] }, () => "adapter");
     assert.equal(result, "adapter", "the gate is off by default");
   } finally {
-    await ctx.stop?.();
+    await ctx.fiber.dispose();
     rmSync(directory, { recursive: true, force: true });
   }
 });
