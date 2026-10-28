@@ -71,3 +71,7 @@
 判定刻意与报表同源（`pricingFor` + `resolvePrice`，与 `defaultPricing` 做引用相等判断），这样「可调用」与「可计费」是同一个条件，不会出现两套口径。豁免走 `allowModels`，接受 `model` 或 `provider/model`。
 
 合并上游时：上游若改动 `pricingFor` 的返回或 `resolvePrice` 的兜底语义，必须同步检查这里的引用相等判断仍然成立。
+
+## Harness 0.2.2-alpha.2
+
+Version `0.6.30-dsh.20261028.1` admits the Harness 0.2.2-alpha.2 and matching Cordis package cohort. Existing account authorization, data roots and plugin configuration are retained. Runtime acceptance is recorded separately from source and artifact checks.
